@@ -293,18 +293,18 @@ export class AnnotationStore {
 			older = Date.parse(saved.updatedAt) > Date.parse(remote.updatedAt) || (missing && Date.parse(saved.updatedAt) === Date.parse(remote.updatedAt));
 		}
 		if (!older) return;
-		const restore = await confirmAnnotationAction(this.app, "Saved handwriting is missing",
-			`${file.name}'s annotation JSON ${current === null ? "is missing" : "is older or incomplete"}. This device has a saved checkpoint with ${saved.strokes.length} strokes. Restore that checkpoint? The current JSON is preserved if it contains different data.`, "Restore saved handwriting");
+		const restore = await confirmAnnotationAction(this.app, "已保存的手写内容丢失了",
+			`${file.name} 的批注 JSON ${current === null ? "已丢失" : "较旧或不完整"}。这台设备上有一份存档点，含 ${saved.strokes.length} 笔。要恢复这份存档点吗？如果当前 JSON 含有不同的数据，会先保留下来。`, "恢复已保存的手写内容");
 		if (!restore) {
-			if (current === null || !annotationContent(current)) throw new Error("Annotation JSON is unavailable. A saved checkpoint is preserved; restore it before opening a blank layer.");
+			if (current === null || !annotationContent(current)) throw new Error("批注 JSON 不可用。已保留一份存档点，请先恢复它，再打开空白批注层。");
 			return;
 		}
 		const latest = await this.app.vault.adapter.exists(path) ? await this.app.vault.adapter.read(path) : null;
-		if (latest !== current) throw new Error("Annotation JSON changed during recovery. Reopen the PDF when sync finishes.");
+		if (latest !== current) throw new Error("恢复期间批注 JSON 发生了变化。请在同步结束后重新打开 PDF。");
 		if (current !== null) await this.app.vault.adapter.write(`${file.path}.${generateId("recovery")}${ANNOTATION_FILE_SUFFIX}`, current);
 		const indexed = this.app.vault.getAbstractFileByPath?.(path);
 		if (indexed instanceof TFile && current !== null) await this.app.vault.process(indexed, raw => {
-			if (raw !== current) throw new Error("Annotation JSON changed during recovery. Both versions were kept.");
+			if (raw !== current) throw new Error("恢复期间批注 JSON 发生了变化。两个版本都已保留。");
 			return savedRaw;
 		});
 		else await this.app.vault.adapter.write(path, savedRaw);
@@ -356,7 +356,7 @@ export class AnnotationStore {
 			if (candidatePath) {
 				path = candidatePath;
 				exists = true;
-				new Notice(`Found annotation data for ${file.name}; using ${candidatePath}.`);
+				new Notice(`找到 ${file.name} 的批注数据，正在使用 ${candidatePath}。`);
 			}
 		}
 		if (!exists) {
@@ -375,7 +375,7 @@ export class AnnotationStore {
 			const raw = await this.app.vault.adapter.read(path);
 			const parsed = JSON.parse(raw) as Partial<AnnotationDocument>;
 			if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.strokes)) {
-				throw new Error("Invalid annotation document structure.");
+				throw new Error("批注文档结构无效。");
 			}
 			const sourcePdfPath = typeof parsed.sourcePdf?.path === "string" ? parsed.sourcePdf.path : parsed.sourceFile;
 			const document: AnnotationDocument = {
@@ -436,13 +436,14 @@ export class AnnotationStore {
 				appendedPages: Array.isArray(parsed.appendedPages)
 					? parsed.appendedPages.map((page, index) => ({
 						id: page.id ?? generateId("page"),
-						title: page.title ?? `Template ${index + 1}`,
+						title: page.title ?? `模板 ${index + 1}`,
 						kind: "template",
-						sourceLabel: "Template page",
+						sourceLabel: "模板页",
 						insertAfterPdfPage: typeof page.insertAfterPdfPage === "number" ? page.insertAfterPdfPage : null,
 						template: page.template ?? "ruled",
 						paperColor: page.paperColor ?? "#fffdf7",
 						pageSize: page.pageSize ?? "a4",
+						customSize: page.customSize && page.customSize.width > 0 && page.customSize.height > 0 ? { width: Number(page.customSize.width), height: Number(page.customSize.height) } : undefined,
 						strokes: [],
 						textItems: [],
 						shapes: [],
@@ -468,15 +469,16 @@ export class AnnotationStore {
 							page: {
 								...entry.page,
 								id: entry.page.id ?? generateId("page"),
-								title: entry.page.title ?? `Removed page ${index + 1}`,
+								title: entry.page.title ?? `已移除的第 ${index + 1} 页`,
 								kind: "template" as const,
-								sourceLabel: "Template page",
+								sourceLabel: "模板页",
 								insertAfterPdfPage: typeof entry.page.insertAfterPdfPage === "number"
 									? entry.page.insertAfterPdfPage
 									: null,
 								template: entry.page.template ?? "ruled",
 								paperColor: entry.page.paperColor ?? "#fffdf7",
 								pageSize: entry.page.pageSize ?? "a4",
+								customSize: entry.page.customSize && entry.page.customSize.width > 0 && entry.page.customSize.height > 0 ? { width: Number(entry.page.customSize.width), height: Number(entry.page.customSize.height) } : undefined,
 								strokes: [],
 								textItems: [],
 								shapes: [],
@@ -540,7 +542,7 @@ export class AnnotationStore {
 			};
 		} catch (error) {
 			console.error("freedraw-pdf: failed to load sidecar", error);
-			throw new Error("Could not read annotation data. The original sidecar is preserved; repair it or restore a backup before editing.");
+			throw new Error("无法读取批注数据。原始附属文件已保留；编辑前请先修复它或恢复备份。");
 		}
 	}
 
@@ -579,7 +581,7 @@ export class AnnotationStore {
 			// exact same annotations. The guarded write below still rechecks disk.
 			if (!sameAnnotationContent(existing, expected ?? null) && !sameAnnotationContent(existing, payload)) {
 				const merged = existing === null ? null : mergeStrokeAdditions(expected ?? JSON.stringify(createEmptyDocument(file)), existing, payload);
-				if (!merged) throw new Error("Annotation data changed in another view or device. Your edits remain in this view; reopen after resolving the conflict.");
+				if (!merged) throw new Error("批注数据在另一个视图或设备上发生了变化。你的修改仍保留在当前视图；请先解决冲突，再重新打开。");
 				payload = merged.payload;
 				remoteAdditions = merged.additions;
 			}
@@ -588,14 +590,14 @@ export class AnnotationStore {
 			this.announceFileWrite(path, savedAt);
 			if (indexedFile instanceof TFile) {
 				await this.app.vault.process(indexedFile, current => {
-					if (!sameAnnotationContent(current, existing)) { throw new Error("Annotation data changed during saving. Both versions must be kept."); }
+					if (!sameAnnotationContent(current, existing)) { throw new Error("保存期间批注数据发生了变化。两个版本都必须保留。"); }
 					return payload;
 				});
 			} else {
 				await this.app.vault.adapter.write(path, payload);
 			}
 			const verified = await this.app.vault.adapter.exists(path) ? await this.app.vault.adapter.read(path) : null;
-			if (!sameAnnotationContent(verified, payload)) throw new Error("Annotation JSON changed or disappeared immediately after saving. This view and its checkpoint retain your handwriting.");
+			if (!sameAnnotationContent(verified, payload)) throw new Error("保存后批注 JSON 立刻发生了变化或消失了。当前视图及其存档点仍保留着你的手写内容。");
 			// Incorporate remote additions without replacing new input received while
 			// this write was in flight. The session's revision loop saves that input next.
 			const currentIds = new Set(document.strokes.map(stroke => stroke.id));
@@ -639,11 +641,11 @@ export class AnnotationStore {
 		if (this.deletedPdfs.has(file.path)) return false;
 		const path = this.getSidecarPath(file);
 		const current = await this.app.vault.adapter.exists(path) ? await this.app.vault.adapter.read(path) : null;
-		const replace = await confirmAnnotationAction(this.app, "Annotation save clash",
-			`The saved JSON for ${file.name} differs from this view. Your edits have a recovery copy. Keep both versions, or save this view and preserve the other version in another recovery JSON?`, "Save this view");
+		const replace = await confirmAnnotationAction(this.app, "批注保存冲突",
+			`${file.name} 已保存的 JSON 与当前视图不同。你的修改已有一份恢复副本。保留两个版本，还是保存当前视图并把另一个版本存到另一个恢复 JSON 里？`, "保存当前视图");
 		if (!replace || this.deletedPdfs.has(file.path)) return false;
 		const latest = await this.app.vault.adapter.exists(path) ? await this.app.vault.adapter.read(path) : null;
-		if (latest !== current) throw new Error("Annotation data changed while choosing. Both versions were kept.");
+		if (latest !== current) throw new Error("选择期间批注数据发生了变化。两个版本都已保留。");
 		if (current !== null) await this.app.vault.adapter.write(`${file.path}.${generateId("recovery")}${ANNOTATION_FILE_SUFFIX}`, current);
 		this.baselines.set(document, {path, raw: current});
 		await this.save(file, document);
@@ -656,10 +658,10 @@ export class AnnotationStore {
 		if (baseline && baseline.path !== expectedSidecarPath) {
 			const current = await this.app.vault.adapter.exists(expectedSidecarPath) ? await this.app.vault.adapter.read(expectedSidecarPath) : null;
 			if (current && !sameAnnotationContent(current, baseline.raw)) {
-				const replace = await confirmAnnotationAction(this.app, "Annotation file clash",
-					`${expectedSidecarPath} already contains different annotations. Keep both files, or use the selected data and preserve the existing data in a recovery JSON?`, "Use selected data");
-				if (!replace) throw new Error("Relinking cancelled. Both annotation files were kept.");
-				if (await this.app.vault.adapter.read(expectedSidecarPath) !== current) throw new Error("Annotation data changed while choosing. Both files were kept.");
+				const replace = await confirmAnnotationAction(this.app, "批注文件冲突",
+					`${expectedSidecarPath} 里已有不同的批注。保留两个文件，还是使用所选数据并把现有数据存到恢复 JSON 里？`, "使用所选数据");
+				if (!replace) throw new Error("已取消重新关联。两个批注文件都已保留。");
+				if (await this.app.vault.adapter.read(expectedSidecarPath) !== current) throw new Error("选择期间批注数据发生了变化。两个文件都已保留。");
 				await this.app.vault.adapter.write(`${file.path}.${generateId("recovery")}${ANNOTATION_FILE_SUFFIX}`, current);
 			}
 			this.baselines.set(document, { path: expectedSidecarPath, raw: current });
@@ -668,8 +670,8 @@ export class AnnotationStore {
 		if (sourceSidecarPath && sourceSidecarPath !== expectedSidecarPath && await this.app.vault.adapter.exists(sourceSidecarPath)) {
 			const sourcePdf = filenamePdfPath(sourceSidecarPath);
 			if (!await this.app.vault.adapter.exists(sourcePdf) || sourcePdf === file.path) {
-				const remove = await confirmAnnotationAction(this.app, "Remove previous annotation JSON?",
-					`The annotations are now saved in ${expectedSidecarPath}. Move ${sourceSidecarPath} to trash?`, "Move to trash");
+				const remove = await confirmAnnotationAction(this.app, "移除之前的批注 JSON？",
+					`批注现在已保存在 ${expectedSidecarPath}。把 ${sourceSidecarPath} 移到回收站？`, "移到回收站");
 				if (remove) await this.trashSidecar(sourceSidecarPath);
 			}
 		}
@@ -696,10 +698,10 @@ export class AnnotationStore {
 			const payload = JSON.stringify({ ...parsed, sourceFile: identity.path, sourcePdf: identity, updatedAt: new Date().toISOString() }, null, 2);
 			if (await this.app.vault.adapter.exists(destinationPath) && !sameAnnotationContent(await this.app.vault.adapter.read(destinationPath), payload)) {
 				const destinationRaw = await this.app.vault.adapter.read(destinationPath);
-				const replace = await confirmAnnotationAction(this.app, "Annotation file clash",
-					`The renamed PDF already has different data in ${destinationPath}. Keep both files, or move the original annotations here and preserve the destination in a recovery JSON?`, "Use original data");
-				if (!replace) throw new Error("Annotation destination already exists. Both sidecars were preserved.");
-				if (await this.app.vault.adapter.read(destinationPath) !== destinationRaw || await this.app.vault.adapter.read(sourcePath) !== raw) throw new Error("Annotation files changed while choosing. Both were preserved.");
+				const replace = await confirmAnnotationAction(this.app, "批注文件冲突",
+					`重命名后的 PDF 在 ${destinationPath} 里已有不同的数据。保留两个文件，还是把原有批注移到这里，并把目标位置的数据存到恢复 JSON 里？`, "使用原有数据");
+				if (!replace) throw new Error("目标批注文件已存在。两个附属文件都已保留。");
+				if (await this.app.vault.adapter.read(destinationPath) !== destinationRaw || await this.app.vault.adapter.read(sourcePath) !== raw) throw new Error("选择期间批注文件发生了变化。两个都已保留。");
 				await this.app.vault.adapter.write(`${file.path}.${generateId("recovery")}${ANNOTATION_FILE_SUFFIX}`, destinationRaw);
 			}
 			await this.app.vault.adapter.write(destinationPath, payload);
@@ -724,7 +726,7 @@ export class AnnotationStore {
 
 	private async trashSidecar(path: string): Promise<void> {
 		if (typeof CustomEvent !== "undefined") this.app.workspace?.containerEl?.ownerDocument?.dispatchEvent(new CustomEvent("freedraw-pdf-file-action",{
-			detail:{path,action:"trash",reason:"Freedraw file management"}
+			detail:{path,action:"trash",reason:"手绘 PDF 文件管理"}
 		}));
 		const indexed = this.app.vault.getAbstractFileByPath(path);
 		if (indexed instanceof TFile) await this.app.fileManager.trashFile(indexed);
@@ -782,7 +784,7 @@ export class AnnotationStore {
 				if (await this.app.vault.read(file) !== raw) continue;
 				await this.trashSidecar(file.path);
 				removed++;
-				rows.push({path:file.path, reason:`Moved to trash: source PDF ${source} no longer exists.`});
+				rows.push({path:file.path, reason:`已移到回收站：源 PDF ${source} 已不存在。`});
 			} else seen.set(content, file.path);
 		}
 		return {removed, rows};
@@ -790,24 +792,24 @@ export class AnnotationStore {
 
 	async combineAnnotationFiles(scope: AnnotationCleanupScope): Promise<{ added: number; variants: number; removed: number; kept: number; pdfs: string[]; rows: AnnotationFileResult[] }> {
 		const result = { added: 0, variants: 0, removed: 0, kept: 0, pdfs: [] as string[], rows: [] as AnnotationFileResult[] };
-		const keep = (path: string, reason: string) => { result.kept++; result.rows.push({path, reason:`Kept: ${reason}`}); };
+		const keep = (path: string, reason: string) => { result.kept++; result.rows.push({path, reason:`已保留：${reason}`}); };
 		const groups = new Map<string, { path: string; raw: string; document: AnnotationDocument }[]>();
 		for (const file of this.app.vault.getFiles()) {
 			if (!isAnnotationJson(file.path) || this.writes.has(file.path)) continue;
 			try {
 				const raw = await this.app.vault.read(file);
-				if (!annotationContent(raw)) { if (inCleanupScope(file.path, "", scope)) keep(file.path, "invalid JSON or missing strokes array."); continue; }
+				if (!annotationContent(raw)) { if (inCleanupScope(file.path, "", scope)) keep(file.path, "JSON 无效或缺少 strokes 数组。"); continue; }
 				const document = JSON.parse(raw) as AnnotationDocument;
 				const source = document.sourcePdf?.path || document.sourceFile;
 				if (!inCleanupScope(file.path, source ?? "", scope)) continue;
-				if (!source || (document.sourceFile && document.sourceFile !== source)) { keep(file.path, "sourceFile and sourcePdf.path do not agree about the PDF."); continue; }
+				if (!source || (document.sourceFile && document.sourceFile !== source)) { keep(file.path, "sourceFile 与 sourcePdf.path 指向的 PDF 不一致。"); continue; }
 				const pdf = this.app.vault.getAbstractFileByPath(source);
-				if (!(pdf instanceof TFile) || pdf.extension.toLowerCase() !== "pdf") { keep(file.path, `source PDF ${source} was not found. Use deleted-PDF cleanup to remove this data.`); continue; }
+				if (!(pdf instanceof TFile) || pdf.extension.toLowerCase() !== "pdf") { keep(file.path, `找不到源 PDF ${source}。请用「清理已删除 PDF 的数据」来移除这些数据。`); continue; }
 				const normalized = await this.loadWithInfo(pdf, file.path);
 				const group = groups.get(source) ?? [];
 				group.push({ path: file.path, raw, document:normalized.document });
 				groups.set(source, group);
-			} catch { if (inCleanupScope(file.path, "", scope)) keep(file.path, "JSON could not be read or has an invalid annotation structure."); }
+			} catch { if (inCleanupScope(file.path, "", scope)) keep(file.path, "JSON 无法读取，或批注结构无效。"); }
 		}
 		// Recovery snapshots have no common edit baseline. Preserve different
 		// versions as separately selectable strokes rather than choosing a winner.
@@ -820,12 +822,12 @@ export class AnnotationStore {
 			if (entries.length < 2) continue;
 			const canonicalPath = `${source}${ANNOTATION_FILE_SUFFIX}`;
 			const primary = entries.find(entry => entry.path === canonicalPath);
-			if (!primary && await this.app.vault.adapter.exists(canonicalPath)) { for (const entry of entries) keep(entry.path, "main JSON exists but could not be loaded; it must be repaired before combining."); continue; }
+			if (!primary && await this.app.vault.adapter.exists(canonicalPath)) { for (const entry of entries) keep(entry.path, "主 JSON 存在但无法加载；合并前必须先修复。"); continue; }
 			const base = primary ?? entries[0];
 			const merged = cloneDocument(base.document);
 			const index = new Map(merged.strokes.map(stroke => [stroke.id, stroke]));
 			const signatures = new Set(merged.strokes.map(comparableStroke));
-			if (index.size !== merged.strokes.length || merged.strokes.some(stroke => !stroke.id)) { for (const entry of entries) keep(entry.path, "main JSON contains missing or repeated stroke IDs."); continue; }
+			if (index.size !== merged.strokes.length || merged.strokes.some(stroke => !stroke.id)) { for (const entry of entries) keep(entry.path, "主 JSON 里有缺失或重复的笔画 ID。"); continue; }
 			const consumed: typeof entries = [];
 			let added = 0;
 			let variants = 0;
@@ -837,9 +839,9 @@ export class AnnotationStore {
 					const keys = new Set([...Object.keys(entry.document), ...Object.keys(base.document)]);
 					const differing = [...keys].filter(key => !["strokes","sourceFile","sourcePdf","updatedAt"].includes(key) &&
 						canonicalValue((entry.document as unknown as Record<string,unknown>)[key]) !== canonicalValue((base.document as unknown as Record<string,unknown>)[key]));
-					keep(entry.path, `differs from ${base.path} in ${differing.join(", ")}. Those page/annotation changes cannot be combined by adding strokes.`); continue;
+					keep(entry.path, `与 ${base.path} 在 ${differing.join(", ")} 上不一致。这些页面或批注方面的更改无法通过补笔画来合并。`); continue;
 				}
-				if (new Set(strokes.map(stroke => stroke.id)).size !== strokes.length || strokes.some(stroke => !stroke.id)) { keep(entry.path, "contains missing or repeated stroke IDs."); continue; }
+				if (new Set(strokes.map(stroke => stroke.id)).size !== strokes.length || strokes.some(stroke => !stroke.id)) { keep(entry.path, "里有缺失或重复的笔画 ID。"); continue; }
 				for (const stroke of strokes) {
 					const signature = comparableStroke(stroke);
 					if (signatures.has(signature)) continue;
@@ -868,7 +870,7 @@ export class AnnotationStore {
 				if (!(pdf instanceof TFile)) return;
 				const expected = primary?.raw ?? null;
 				const current = await this.app.vault.adapter.exists(canonicalPath) ? await this.app.vault.adapter.read(canonicalPath) : null;
-				if (current !== expected) { for (const entry of consumed) keep(entry.path, "main JSON changed during combining; run again after saving or sync finishes."); return; }
+				if (current !== expected) { for (const entry of consumed) keep(entry.path, "合并期间主 JSON 发生了变化；请在保存或同步结束后再运行一次。"); return; }
 				merged.sourceFile = source; merged.sourcePdf = getPdfIdentity(pdf); merged.updatedAt = new Date().toISOString();
 				const payload = JSON.stringify(merged, null, 2);
 				// Preserve the previous primary for rollback before changing it.
@@ -878,22 +880,22 @@ export class AnnotationStore {
 				await this.writeCheckpoint(pdf, payload);
 				this.announceFileWrite(canonicalPath, merged.updatedAt);
 				if (indexed instanceof TFile) await this.app.vault.process(indexed, raw => {
-					if (raw !== expected) throw new Error("Annotation data changed during combining. Source JSON files were kept.");
+					if (raw !== expected) throw new Error("合并期间批注数据发生了变化。源 JSON 文件已保留。");
 					return payload;
 				});
 				else await this.app.vault.create(canonicalPath, payload);
-				if (await this.app.vault.adapter.read(canonicalPath) !== payload) throw new Error("Combined JSON could not be confirmed. Source files were kept.");
+				if (await this.app.vault.adapter.read(canonicalPath) !== payload) throw new Error("无法确认合并后的 JSON。源文件已保留。");
 				result.added += added; result.variants += variants; result.pdfs.push(source);
 				let removed = 0;
 				for (const entry of consumed) {
 					if (entry.path === canonicalPath) continue;
 					if (await this.app.vault.adapter.read(entry.path) !== entry.raw) {
-						keep(entry.path, "changed after combining, so its newer data was not removed."); continue;
+						keep(entry.path, "在合并之后又发生了变化，所以较新的数据没有被移除。"); continue;
 					}
 					await this.trashSidecar(entry.path); result.removed++; removed++;
 				}
 				if (backupPath) await this.trashSidecar(backupPath);
-				result.rows.push({path:source, reason:`Added ${added} strokes${variants ? `, including ${variants} different versions kept as separate strokes` : ""}. Removed ${removed} recovery copies. Saved in ${canonicalPath.slice(canonicalPath.lastIndexOf("/") + 1)}.`});
+				result.rows.push({path:source, reason:`已补入 ${added} 笔${variants ? `（其中 ${variants} 个不同版本作为独立笔画保留）` : ""}，移除 ${removed} 个恢复副本，已保存到 ${canonicalPath.slice(canonicalPath.lastIndexOf("/") + 1)}。`});
 			});
 			this.writes.set(canonicalPath, operation);
 			try { await operation; } finally { if (this.writes.get(canonicalPath) === operation) this.writes.delete(canonicalPath); }
@@ -923,6 +925,6 @@ export class AnnotationStore {
 				if (Array.isArray(data.strokes) && data.sourcePdf?.size === file.stat.size && !await this.app.vault.adapter.exists(source)) candidates.push(path);
 			} catch { /* Keep unreadable data available for manual repair. */ }
 		}
-		return chooseAnnotationFile(this.app, "Found annotation data", `These orphan JSON files may belong to ${file.name}. Matching file size does not prove they belong to this PDF. Choose the correct file, or cancel to start an empty layer.`, candidates);
+		return chooseAnnotationFile(this.app, "找到批注数据", `这些孤立的 JSON 文件可能属于 ${file.name}。文件大小一致并不能证明它们属于这份 PDF。请选择正确的文件，或取消并从空白批注层开始。`, candidates);
 	}
 }

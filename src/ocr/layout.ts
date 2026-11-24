@@ -1,7 +1,7 @@
 import type { AnnotationDocument, NormalizedRect, StrokeAnnotation } from "../types";
 import { getOcrPageView, getValidOcrGroups, type OcrGroup, type OcrLine } from "./model";
 
-export const OCR_TEXT_LABEL = "Recognised text, read only";
+export const OCR_TEXT_LABEL = "识别出的文字（只读）";
 export const OCR_FONT = "Arial";
 export interface OcrTextRun {
 	text: string; box: NormalizedRect; color: string;

@@ -92,6 +92,9 @@ export class ToolStateController {
 				this.applyPreset(defaultPreset.id);
 			}
 		}
+		// applyPreset forces the preset's tool; reinstate the tool that was active last time.
+		const savedTool = initialState?.activeTool;
+		if (savedTool && savedTool !== this.state.activeTool) this.setActiveTool(savedTool);
 	}
 
 	get snapshot(): ToolStateSnapshot {

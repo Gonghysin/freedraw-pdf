@@ -13,7 +13,7 @@ export class AnnotationPathSuggest extends AbstractInputSuggest<string> {
 		return this.paths.map(path=>({path,match:search(path)})).filter(entry=>entry.match!==null)
 			.sort((a,b)=>b.match!.score-a.match!.score || a.path.localeCompare(b.path)).map(entry=>entry.path);
 	}
-	renderSuggestion(path:string,element:HTMLElement):void {element.setText(path || "Vault root (/)");}
+	renderSuggestion(path:string,element:HTMLElement):void {element.setText(path || "库根目录 (/)");}
 	selectSuggestion(path:string):void {this.setValue(path || "/");this.picked(path);this.close();this.input.focus();}
 }
 
@@ -27,16 +27,16 @@ class AnnotationScopeModal extends Modal {
 		super(app);this.cleanupScope={kind:activePdf?"pdf":"vault",path:activePdf??""};
 	}
 	onOpen():void {
-		this.setTitle("Choose annotation cleanup scope");
+		this.setTitle("选择批注清理范围");
 		this.modalEl?.addClass("pdf-native-annotator-dialog");
 		let validate=()=>true;
-		new Setting(this.contentEl).setName("Include").addDropdown(dropdown=>dropdown
-			.addOption("pdf","One PDF").addOption("folder","A folder and its subfolders").addOption("vault","Whole vault")
+		new Setting(this.contentEl).setName("包含范围").addDropdown(dropdown=>dropdown
+			.addOption("pdf","单个 PDF").addOption("folder","一个文件夹及其子文件夹").addOption("vault","整个库")
 			.setValue(this.cleanupScope.kind).onChange(value=>{this.cleanupScope={kind:value as AnnotationCleanupScope["kind"],path:""};renderTarget();}));
 		const target=this.contentEl.createDiv();
 		const renderTarget=()=>{
 			this.suggest?.close();this.suggest=null;target.empty();
-			if(this.cleanupScope.kind==="vault"){this.pathInput=null;validate=()=>true;target.createEl("p",{text:"All annotation JSON files in this vault are included."});return;}
+			if(this.cleanupScope.kind==="vault"){this.pathInput=null;validate=()=>true;target.createEl("p",{text:"包含本库中所有批注 JSON 文件。"});return;}
 			const paths=this.cleanupScope.kind==="pdf"?this.pdfs:this.folders;
 			const error=target.createEl("p",{cls:"freedraw-pdf-path-error"});
 			error.hidden=true;
@@ -48,17 +48,17 @@ class AnnotationScopeModal extends Modal {
 				const typed=this.cleanupScope.path.toLocaleLowerCase();
 				const matches=paths.filter(path=>path.toLocaleLowerCase()===typed);
 				if(matches.length===1){this.cleanupScope.path=matches[0];return true;}
-				error.setText(`Enter a valid ${this.cleanupScope.kind==="pdf"?"PDF":"folder"} path. You can type it yourself or use a suggestion.`);error.hidden=false;this.pathInput?.focus();return false;
+				error.setText(`请输入有效的${this.cleanupScope.kind==="pdf"?" PDF":"文件夹"}路径。可以自己输入，也可以用建议项。`);error.hidden=false;this.pathInput?.focus();return false;
 			};
-			const row=new Setting(target).setName(this.cleanupScope.kind==="pdf"?"PDF":"Folder")
-				.setDesc(this.cleanupScope.kind==="pdf"?"Type a PDF path or choose a suggestion.":"Type a folder path or choose a suggestion. Use / for the vault root.")
+			const row=new Setting(target).setName(this.cleanupScope.kind==="pdf"?"PDF":"文件夹")
+				.setDesc(this.cleanupScope.kind==="pdf"?"输入 PDF 路径，或选择一项建议。":"输入文件夹路径，或选择一项建议。库根目录用 / 。")
 				.addText(text=>{
 					this.pathInput=text.inputEl;
 					text.inputEl.disabled=false;text.inputEl.readOnly=false;
 					text.inputEl.setAttribute("autocomplete","off");
 					text.inputEl.addClass("freedraw-pdf-path-input");
-					text.inputEl.setAttribute("aria-label",this.cleanupScope.kind==="pdf"?"PDF path":"Folder path");
-					text.setPlaceholder(this.cleanupScope.kind==="pdf"?"Folder/Question paper.pdf":"Folder/Subfolder")
+					text.inputEl.setAttribute("aria-label",this.cleanupScope.kind==="pdf"?"PDF 路径":"文件夹路径");
+					text.setPlaceholder(this.cleanupScope.kind==="pdf"?"文件夹/试卷.pdf":"文件夹/子文件夹")
 						.setValue(this.cleanupScope.path || (this.cleanupScope.kind==="folder"?"/":"")).onChange(update);
 					this.suggest=new AnnotationPathSuggest(this.app,text.inputEl,paths,path=>update(path));
 					update(text.getValue());
@@ -66,8 +66,8 @@ class AnnotationScopeModal extends Modal {
 			row.settingEl.addClass("freedraw-pdf-path-setting");
 		};
 		renderTarget();
-		new Setting(this.contentEl).addButton(button=>button.setButtonText("Cancel").onClick(()=>this.close()))
-			.addButton(button=>{button.setButtonText("Continue").setCta().onClick(()=>{if(!validate())return;this.accepted=true;this.close();});});
+		new Setting(this.contentEl).addButton(button=>button.setButtonText("取消").onClick(()=>this.close()))
+			.addButton(button=>{button.setButtonText("继续").setCta().onClick(()=>{if(!validate())return;this.accepted=true;this.close();});});
 	}
 	onClose():void {this.suggest?.close();this.suggest=null;this.contentEl.empty();this.finish(this.accepted?this.cleanupScope:null);}
 }
@@ -87,13 +87,13 @@ export function chooseAnnotationScope(app: App, activePdf?: string): Promise<Ann
 class AnnotationReportModal extends Modal {
 	constructor(app: App, private readonly summary: string, private readonly rows: AnnotationFileResult[]) { super(app); }
 	onOpen(): void {
-		this.setTitle("Cleanup complete");
+		this.setTitle("清理完成");
 		this.modalEl?.addClass("pdf-native-annotator-dialog");
 		this.contentEl.createEl("p", {text: this.summary});
 		const list = this.contentEl.createDiv({cls:"freedraw-pdf-file-report"});
 		for (const row of this.rows) new Setting(list).setName(row.path.slice(row.path.lastIndexOf("/") + 1)).setDesc(row.reason);
-		if (!this.rows.length) list.createEl("p", {text:"No matching annotation files needed changes."});
-		new Setting(this.contentEl).addButton(button => button.setButtonText("Close").onClick(() => this.close()));
+		if (!this.rows.length) list.createEl("p", {text:"没有需要处理的批注文件。"});
+		new Setting(this.contentEl).addButton(button => button.setButtonText("关闭").onClick(() => this.close()));
 	}
 	onClose(): void { this.contentEl.empty(); }
 }
@@ -119,7 +119,7 @@ class AnnotationConfirmationModal extends Modal {
 			}
 		}
 		new Setting(this.contentEl)
-			.addButton(button => button.setButtonText("Keep data").onClick(() => this.close()))
+			.addButton(button => button.setButtonText("保留数据").onClick(() => this.close()))
 			.addButton(button => button.setButtonText(this.action).setWarning().onClick(() => {
 				this.accepted = true;
 				this.close();
@@ -144,13 +144,13 @@ class AnnotationFileChoiceModal extends Modal {
 		this.setTitle(this.title);
 		this.modalEl?.addClass("pdf-native-annotator-dialog");
 		this.contentEl.createEl("p", { text: this.message });
-		new Setting(this.contentEl).setName("Annotation data JSON").addDropdown(dropdown => {
+		new Setting(this.contentEl).setName("批注数据 JSON").addDropdown(dropdown => {
 			for (const path of this.paths) dropdown.addOption(path, path.slice(path.lastIndexOf("/") + 1));
 			dropdown.setValue(this.selected).onChange(value => this.selected = value);
 		});
 		new Setting(this.contentEl)
-			.addButton(button => button.setButtonText("Cancel").onClick(() => this.close()))
-			.addButton(button => button.setButtonText("Use selected data").setCta().onClick(() => {
+			.addButton(button => button.setButtonText("取消").onClick(() => this.close()))
+			.addButton(button => button.setButtonText("使用所选数据").setCta().onClick(() => {
 				this.accepted = true; this.close();
 			}));
 	}

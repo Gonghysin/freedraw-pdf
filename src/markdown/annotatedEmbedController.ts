@@ -33,10 +33,10 @@ export class AnnotatedEmbedController {
 		const block = this.buildBlock(file, page, rect);
 		try {
 			await this.host.writeClipboardText(block);
-			new Notice(rect ? `Copied annotated region embed for ${file.name} page ${page}.` : `Copied annotated embed for ${file.name} page ${page}.`);
+			new Notice(rect ? `已复制 ${file.name} 第 ${page} 页的区域批注嵌入。` : `已复制 ${file.name} 第 ${page} 页的批注嵌入。`);
 		} catch (error) {
 			console.error("freedraw-pdf: failed to copy annotated embed block", error);
-			new Notice(`Copy failed. Embed block: ${block}`);
+			new Notice(`复制失败。嵌入块：${block}`);
 		}
 	}
 
@@ -45,7 +45,7 @@ export class AnnotatedEmbedController {
 		const block = this.buildBlock(file, page, rect);
 		const prefix = editor.getCursor().ch === 0 ? "" : "\n";
 		editor.replaceSelection(`${prefix}${block}\n`);
-		new Notice(rect ? `Inserted annotated region embed for ${file.name} page ${page}.` : `Inserted annotated embed for ${file.name} page ${page}.`);
+		new Notice(rect ? `已插入 ${file.name} 第 ${page} 页的区域批注嵌入。` : `已插入 ${file.name} 第 ${page} 页的批注嵌入。`);
 	}
 
 	refreshForPath(path: string): void {
@@ -67,29 +67,29 @@ export class AnnotatedEmbedController {
 		const showHeader = this.host.shouldShowAnnotatedEmbedHeader();
 		wrapper.classList.toggle("is-header-hidden", !showHeader);
 		const header = showHeader ? wrapper.createDiv({ cls: "freedraw-pdf-markdown-embed-header" }) : null;
-		const title = header?.createDiv({ cls: "freedraw-pdf-markdown-embed-title", text: "Annotated PDF page" }) ?? null;
+		const title = header?.createDiv({ cls: "freedraw-pdf-markdown-embed-title", text: "带批注的 PDF 页" }) ?? null;
 		const actions = header?.createDiv({ cls: "freedraw-pdf-markdown-embed-actions" }) ?? null;
 		if (!config.path) {
-			wrapper.createDiv({ cls: "freedraw-pdf-markdown-embed-error", text: "Missing `path:` in freedraw-pdf block." });
+			wrapper.createDiv({ cls: "freedraw-pdf-markdown-embed-error", text: "freedraw-pdf 代码块里缺少 `path:`。" });
 			return;
 		}
 		const file = this.resolveFile(config.path, sourcePath);
 		if (!file) {
-			wrapper.createDiv({ cls: "freedraw-pdf-markdown-embed-error", text: `Could not find PDF: ${config.path}` });
+			wrapper.createDiv({ cls: "freedraw-pdf-markdown-embed-error", text: `找不到 PDF：${config.path}` });
 			return;
 		}
 		if (title) {
-			title.textContent = config.rect ? `${file.name} - page ${config.page} region` : `${file.name} - page ${config.page}`;
+			title.textContent = config.rect ? `${file.name} - 第 ${config.page} 页区域` : `${file.name} - 第 ${config.page} 页`;
 		}
 		wrapper.title = config.rect
-			? "Double-click to open this annotated region. Right-click for actions."
-			: "Double-click to open this annotated page. Right-click for actions.";
+			? "双击打开这个带批注的区域，右键查看更多操作。"
+			: "双击打开这个带批注的页面，右键查看更多操作。";
 		const body = wrapper.createDiv({ cls: "freedraw-pdf-markdown-embed-body" });
 		let renderVersion = 0;
 		const render = (forceRefresh = false): void => {
 			const version = ++renderVersion;
 			body.empty();
-			body.createDiv({ cls: "freedraw-pdf-markdown-embed-loading", text: forceRefresh ? "Refreshing annotated page..." : "Rendering annotated page..." });
+			body.createDiv({ cls: "freedraw-pdf-markdown-embed-loading", text: forceRefresh ? "正在刷新带批注的页面…" : "正在渲染带批注的页面…" });
 			void this.renderPageToCanvas(file, config.page, config.width, config.rect, forceRefresh)
 				.then((canvas) => {
 					if (version !== renderVersion || !wrapper.isConnected) {
@@ -120,11 +120,11 @@ export class AnnotatedEmbedController {
 			this.openEmbedContextMenu(event, file, config.page, config.rect, render);
 		});
 		if (actions) {
-			const openButton = actions.createEl("button", { type: "button", text: "Open", cls: "freedraw-pdf-markdown-embed-action" });
+			const openButton = actions.createEl("button", { type: "button", text: "打开", cls: "freedraw-pdf-markdown-embed-action" });
 			openButton.addEventListener("click", () => void this.host.openPdfPage(file, config.page, config.rect));
-			const refreshButton = actions.createEl("button", { type: "button", text: "Refresh", cls: "freedraw-pdf-markdown-embed-action" });
+			const refreshButton = actions.createEl("button", { type: "button", text: "刷新", cls: "freedraw-pdf-markdown-embed-action" });
 			refreshButton.addEventListener("click", () => render(true));
-			const copyButton = actions.createEl("button", { type: "button", text: "Copy block", cls: "freedraw-pdf-markdown-embed-action" });
+			const copyButton = actions.createEl("button", { type: "button", text: "复制代码块", cls: "freedraw-pdf-markdown-embed-action" });
 			copyButton.addEventListener("click", () => void this.copyBlock(file, config.page, config.rect));
 		}
 		const instanceId = generateId("embed");
@@ -146,12 +146,12 @@ export class AnnotatedEmbedController {
 		rect: NormalizedRect | null
 	): void {
 		body.empty();
-		const errorMessage = error instanceof Error ? error.message : "Could not render annotated PDF page.";
+		const errorMessage = error instanceof Error ? error.message : "无法渲染带批注的 PDF 页。";
 		const errorEl = body.createDiv({ cls: "freedraw-pdf-markdown-embed-error" });
 		if (errorMessage === PDF_JS_LOAD_ERROR_MESSAGE) {
 			errorEl.appendText(`${PDF_JS_LOAD_ERROR_MESSAGE} Open `);
 			this.appendEmbedSourceLink(errorEl, file, page, rect);
-			errorEl.appendText(" directly, then retry this action.");
+			errorEl.appendText(" 后再重试此操作。");
 			return;
 		}
 		errorEl.setText(errorMessage);
@@ -186,20 +186,20 @@ export class AnnotatedEmbedController {
 	): void {
 		const menu = new Menu();
 		menu.addItem((item) => item
-			.setTitle(rect ? "Open annotated region" : "Open annotated page")
+			.setTitle(rect ? "打开带批注的区域" : "打开带批注的页面")
 			.setIcon("file-text")
 			.onClick(() => void this.host.openPdfPage(file, page, rect)));
 		menu.addItem((item) => item
-			.setTitle("Refresh preview")
+			.setTitle("刷新预览")
 			.setIcon("refresh-cw")
 			.onClick(() => render(true)));
 		menu.addSeparator();
 		menu.addItem((item) => item
-			.setTitle("Copy embed block")
+			.setTitle("复制嵌入块")
 			.setIcon("code")
 			.onClick(() => void this.copyBlock(file, page, rect)));
 		menu.addItem((item) => item
-			.setTitle(rect ? "Copy region reference" : "Copy page link")
+			.setTitle(rect ? "复制区域引用" : "复制页链接")
 			.setIcon("link")
 			.onClick(() => void this.copyReference(file, page, rect)));
 		menu.showAtPosition({ x: event.clientX, y: event.clientY });
@@ -211,10 +211,10 @@ export class AnnotatedEmbedController {
 			: `[[${file.path}#page=${page}]]`;
 		try {
 			await this.host.writeClipboardText(reference);
-			new Notice(rect ? "Copied region reference." : `Copied page ${page} link.`);
+			new Notice(rect ? "已复制区域引用。" : `已复制第 ${page} 页链接。`);
 		} catch (error) {
 			console.error("freedraw-pdf: failed to copy embed reference", error);
-			new Notice(`Copy failed. Reference: ${reference}`);
+			new Notice(`复制失败。引用：${reference}`);
 		}
 	}
 
@@ -266,7 +266,7 @@ export class AnnotatedEmbedController {
 				canvas.height = Math.max(1, Math.round(viewport.height));
 				const context = canvas.getContext("2d");
 				if (!context) {
-					throw new Error("Could not create embed canvas.");
+					throw new Error("无法创建嵌入画布。");
 				}
 				context.fillStyle = "#ffffff";
 				context.fillRect(0, 0, canvas.width, canvas.height);
@@ -277,7 +277,7 @@ export class AnnotatedEmbedController {
 				if (pageTemplate) {
 					drawTemplatePageBackground(context, canvas.width, canvas.height, {
 						id: `pdf-template-${pageNumber}`,
-						title: `Page ${pageNumber}`,
+						title: `第 ${pageNumber} 页`,
 						kind: "template",
 						template: pageTemplate.template,
 						paperColor: pageTemplate.paperColor,
@@ -297,15 +297,15 @@ export class AnnotatedEmbedController {
 			const syntheticIndex = pageNumber - pdfDocument.numPages - 1;
 			const syntheticPage = annotationDocument.appendedPages?.[syntheticIndex];
 			if (!syntheticPage) {
-				throw new Error(`Page ${pageNumber} is outside this PDF annotation session.`);
+				throw new Error(`第 ${pageNumber} 页不在这次 PDF 批注会话范围内。`);
 			}
-			const dimensions = getNotebookPageSizeDimensions(syntheticPage.pageSize);
+			const dimensions = getNotebookPageSizeDimensions(syntheticPage.pageSize, syntheticPage.customSize);
 			const canvas = createEl("canvas");
 			canvas.width = renderWidth;
 			canvas.height = Math.max(1, Math.round(renderWidth * dimensions.height / Math.max(dimensions.width, 1)));
 			const context = canvas.getContext("2d");
 			if (!context) {
-				throw new Error("Could not create embed canvas.");
+				throw new Error("无法创建嵌入画布。");
 			}
 			drawTemplatePageBackground(context, canvas.width, canvas.height, syntheticPage);
 			await renderAnnotationDocumentPageImages(context, annotationDocument, pageNumber, canvas.width, canvas.height);

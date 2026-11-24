@@ -14,22 +14,22 @@ export function shapeOptionRows(getOptions: () => ShapeOptions | undefined, onCh
  };
  const update = (patch: Partial<ShapeOptions>) => { onChange(normalizeShapeToolOptions({ ...read(), ...patch })); refresh(); };
  return [
-  { name: "Shape creation", render: setting => {
-   setting.setName("Shape creation").addDropdown(dropdown => {
+  { name: "形状创建方式", render: setting => {
+   setting.setName("形状创建方式").addDropdown(dropdown => {
     methodControl = dropdown;
-    dropdown.addOptions({ hold: "Draw and hold", drag: "Drag to size" }).onChange(value => update({ method: value === "drag" ? "drag" : "hold" }));
+    dropdown.addOptions({ hold: "画完后按住", drag: "拖拽定大小" }).onChange(value => update({ method: value === "drag" ? "drag" : "hold" }));
    }); refresh();
   }},
-  { name: "Drag shape", render: setting => {
-   setting.setName("Drag shape").addDropdown(dropdown => {
+  { name: "拖拽形状", render: setting => {
+   setting.setName("拖拽形状").addDropdown(dropdown => {
     shapeControl = dropdown;
-    dropdown.addOptions({ line: "Line", rectangle: "Rectangle", ellipse: "Ellipse", triangle: "Triangle" }).onChange(value => update({ shape: value as ShapeOptions["shape"] }));
+    dropdown.addOptions({ line: "直线", rectangle: "矩形", ellipse: "椭圆", triangle: "三角形" }).onChange(value => update({ shape: value as ShapeOptions["shape"] }));
    }); refresh();
   }},
-  { name: "Shape line style", render: setting => {
-   setting.setName("Shape line style").addDropdown(dropdown => {
+  { name: "形状线型", render: setting => {
+   setting.setName("形状线型").addDropdown(dropdown => {
     lineControl = dropdown;
-    dropdown.addOptions({ solid: "Solid", dashed: "Dashed", dotted: "Dotted", wavy: "Wavy" }).onChange(value => update({ lineStyle: value as ShapeOptions["lineStyle"] }));
+    dropdown.addOptions({ solid: "实线", dashed: "虚线", dotted: "点线", wavy: "波浪线" }).onChange(value => update({ lineStyle: value as ShapeOptions["lineStyle"] }));
    }); refresh();
   }}
  ];

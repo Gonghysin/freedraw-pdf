@@ -13,6 +13,8 @@ export interface ShapeOptions {
 	/** Remember the chosen drag shape while draw-and-hold uses automatic fitting. */
 	dragShape?: ShapeTool;
 	appearance: "pen" | "highlighter";
+	/** Region highlight: the dragged rectangle is filled instead of outlined. */
+	filled?: boolean;
 	lineStyle: ShapeLineStyle;
 	/** Wave amplitude as a multiple of the stored stroke width. */
 	waveSize: number;
@@ -20,7 +22,7 @@ export interface ShapeOptions {
 	highlighter: ShapeInkStyle;
 }
 export type InkToolKind = "pen" | "highlighter";
-export type InkDrawingMode = "freehand" | "straight" | "hold";
+export type InkDrawingMode = "freehand" | "straight" | "hold" | "region";
 export interface InkToolOptions {
 	mode: InkDrawingMode;
 	holdShape: ShapeChoice;
@@ -62,6 +64,8 @@ export interface InkRenderSettings {
 	taperStart: number;
 	taperEnd: number;
 	pressureMode: InkPressureMode;
+	/** Mouse/trackpad input smoothing (One Euro filter), 0 = off. Missing = 0.5. */
+	mouseSmoothing?: number;
 }
 
 export interface ToolPreset {
@@ -187,6 +191,8 @@ export interface ShapeAnnotation {
 	/** Remaining centreline paths/dots after touch erase, relative to the shape's box. */
 	clippedGeometry?: { paths: Array<Array<{ x: number; y: number }>>; dots: Array<{ x: number; y: number }> };
 	appearance?: "pen" | "highlighter";
+	/** Filled rectangle (区域高亮). */
+	filled?: boolean;
 	opacity?: number;
 	lineStyle?: ShapeLineStyle;
 	waveSize?: number;
@@ -252,6 +258,8 @@ export interface NotebookPage {
 	template: NotebookTemplate;
 	paperColor: string;
 	pageSize: NotebookPageSize;
+	/** Overrides pageSize with explicit proportions (A4 width = 920), e.g. to match the page it was added after. */
+	customSize?: { width: number; height: number };
 	strokes: StrokeAnnotation[];
 	textItems: TextAnnotation[];
 	shapes: ShapeAnnotation[];

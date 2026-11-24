@@ -57,6 +57,7 @@ import { NOTEBOOK_PAGE_SIZES, NOTEBOOK_TEMPLATES, createTemplateNotebookPage, ge
 import {
 	hidePdfPage,
 	insertSyntheticPage,
+	moveSyntheticPageIndex,
 	permanentlyDeleteHiddenPdfPage,
 	permanentlyDeleteRemovedPage,
 	removeSyntheticPageToTrash,
@@ -98,6 +99,8 @@ import { registerSessionCommands } from "./src/commands/sessionCommands";
 import { prioritizeRenderPages, runCooperativeRenderSlice } from "./src/render/cooperativeRender";
 import type { CooperativeRenderStep } from "./src/render/cooperativeRender";
 import { RenderTelemetryBroadcaster } from "./src/debug/renderTelemetry";
+import { installZoomDock } from "./src/ui/zoomDock";
+import { PointerPathSmoother } from "./src/ink/oneEuroFilter";
 import type {
 	AnnotationClipboardPayload,
 	AnnotationDocument,
@@ -178,6 +181,7 @@ interface NativeInsertPageOptions {
 	template: NotebookTemplate;
 	pageSize: NotebookPageSize;
 	paperColor: string;
+	customSize?: { width: number; height: number };
 }
 
 type HistoryEntry =
@@ -216,7 +220,7 @@ interface CanvasSnapshot {
 
 class BlankAnnotatablePdfModal extends Modal {
 	private options: BlankAnnotatablePdfOptions = {
-		title: "New annotatable PDF",
+		title: "新建可批注 PDF",
 		pageCount: 1,
 		template: "blank",
 		pageSize: "a4",
@@ -227,7 +231,7 @@ class BlankAnnotatablePdfModal extends Modal {
 		super(app);
 		this.options.template = defaults.template;
 		this.options.paperColor = defaults.paperColor;
-		this.titleEl.setText("Create annotatable PDF");
+		this.titleEl.setText("新建可批注 PDF");
 		this.modalEl.addClass("pdf-native-annotator-native-modal");
 	}
 
@@ -235,23 +239,23 @@ class BlankAnnotatablePdfModal extends Modal {
 		const { contentEl } = this;
 		contentEl.empty();
 		contentEl.createEl("p", {
-			text: "Creates a real PDF in the vault and opens it in Obsidian's native PDF viewer.",
+			text: "在库里创建一个真正的 PDF，并用 Obsidian 自带的 PDF 查看器打开。",
 			cls: "setting-item-description"
 		});
 
 		new Setting(contentEl)
-			.setName("Title")
-			.setDesc("The PDF filename.")
+			.setName("标题")
+			.setDesc("PDF 文件名。")
 			.addText((text) => {
 				text.setValue(this.options.title);
 				text.onChange((value) => {
-					this.options.title = value.trim() || "New annotatable PDF";
+					this.options.title = value.trim() || "新建可批注 PDF";
 				});
 			});
 
 		new Setting(contentEl)
-			.setName("Pages")
-			.setDesc("Number of template pages to create.")
+			.setName("页数")
+			.setDesc("要创建的模板页数。")
 			.addText((text) => {
 				text.inputEl.type = "number";
 				text.inputEl.min = "1";
@@ -264,7 +268,7 @@ class BlankAnnotatablePdfModal extends Modal {
 			});
 
 		new Setting(contentEl)
-			.setName("Template")
+			.setName("模板")
 			.addDropdown((dropdown) => {
 				NOTEBOOK_TEMPLATES.forEach((template) => {
 					dropdown.addOption(template, getNotebookTemplateLabel(template));
@@ -276,7 +280,7 @@ class BlankAnnotatablePdfModal extends Modal {
 			});
 
 		new Setting(contentEl)
-			.setName("Paper size")
+			.setName("纸张大小")
 			.addDropdown((dropdown) => {
 				NOTEBOOK_PAGE_SIZES.forEach((pageSize) => {
 					dropdown.addOption(pageSize, getNotebookPageSizeLabel(pageSize));
@@ -294,11 +298,11 @@ class BlankAnnotatablePdfModal extends Modal {
 			syncPaperDropdown?.(color);
 			syncPaperPicker?.(color);
 		};
-		new Setting(contentEl).setName("Paper colour")
+		new Setting(contentEl).setName("纸色")
 			.addDropdown(dropdown => {
 				PAPER_COLOR_PRESETS.forEach(preset => { dropdown.addOption(preset.color, preset.label); });
 				syncPaperDropdown = color => {
-					if (!Array.from(dropdown.selectEl.options).some(option => option.value === color)) dropdown.addOption(color, "Custom colour");
+					if (!Array.from(dropdown.selectEl.options).some(option => option.value === color)) dropdown.addOption(color, "自定义颜色");
 					dropdown.setValue(color);
 				};
 				syncPaperDropdown(this.options.paperColor);
@@ -310,14 +314,14 @@ class BlankAnnotatablePdfModal extends Modal {
 			});
 
 		contentEl.createDiv("modal-button-container", (buttonContainer) => {
-			buttonContainer.createEl("button", { cls: "mod-cta", text: "Create PDF" }, (button) => {
+			buttonContainer.createEl("button", { cls: "mod-cta", text: "创建 PDF" }, (button) => {
 				button.addEventListener("click", () => {
 					const options = { ...this.options };
 					this.close();
 					this.onSubmit(options);
 				});
 			});
-			buttonContainer.createEl("button", { text: "Cancel" }, (button) => {
+			buttonContainer.createEl("button", { text: "取消" }, (button) => {
 				button.addEventListener("click", () => this.close());
 			});
 		});
@@ -341,32 +345,32 @@ class NativeInsertPageModal extends Modal {
 	) {
 		super(app);
 		this.options = { ...defaults };
-		this.titleEl.setText(this.mode === "temporary" ? "Add template page" : "Insert native template page");
+		this.titleEl.setText(this.mode === "temporary" ? "添加模板页" : "插入原生模板页");
 		this.modalEl.addClass("pdf-native-annotator-native-modal");
 	}
 
 	onOpen(): void {
 		const { contentEl } = this;
-		this.titleEl.setText(this.mode === "temporary" ? "Add template page" : "Insert native template page");
+		this.titleEl.setText(this.mode === "temporary" ? "添加模板页" : "插入原生模板页");
 		contentEl.empty();
 		contentEl.createEl("p", {
 			text: this.mode === "temporary"
-				? `Adds a temporary template page ${this.position} ${this.anchorLabel}. It stays editable and is included when you export the finished PDF.`
-				: `Creates a new native working PDF with this template page inserted ${this.position} ${this.anchorLabel}. Existing annotations are remapped and remain editable.`,
+				? `在${this.anchorLabel}${this.position === "before" ? "之前" : "之后"}添加一个临时模板页。它可以继续编辑，导出成品 PDF 时会一并包含。`
+				: `新建一份原生工作 PDF，并把这张模板页插入到${this.anchorLabel}${this.position === "before" ? "之前" : "之后"}。已有批注会被重新对应，仍可继续编辑。`,
 			cls: "setting-item-description"
 		});
 
 		new Setting(contentEl)
-			.setName("Page title")
+			.setName("页面标题")
 			.addText((text) => {
 				text.setValue(this.options.title);
 				text.onChange((value) => {
-					this.options.title = value.trim() || "Inserted page";
+					this.options.title = value.trim() || "已插入的页面";
 				});
 			});
 
 		new Setting(contentEl)
-			.setName("Template")
+			.setName("模板")
 			.addDropdown((dropdown) => {
 				NOTEBOOK_TEMPLATES.forEach((template) => {
 					dropdown.addOption(template, getNotebookTemplateLabel(template));
@@ -378,7 +382,7 @@ class NativeInsertPageModal extends Modal {
 			});
 
 		new Setting(contentEl)
-			.setName("Paper size")
+			.setName("纸张大小")
 			.addDropdown((dropdown) => {
 				NOTEBOOK_PAGE_SIZES.forEach((pageSize) => {
 					dropdown.addOption(pageSize, getNotebookPageSizeLabel(pageSize));
@@ -396,11 +400,11 @@ class NativeInsertPageModal extends Modal {
 			syncPaperDropdown?.(color);
 			syncPaperPicker?.(color);
 		};
-		new Setting(contentEl).setName("Paper colour")
+		new Setting(contentEl).setName("纸色")
 			.addDropdown(dropdown => {
 				PAPER_COLOR_PRESETS.forEach(preset => { dropdown.addOption(preset.color, preset.label); });
 				syncPaperDropdown = color => {
-					if (!Array.from(dropdown.selectEl.options).some(option => option.value === color)) dropdown.addOption(color, "Custom colour");
+					if (!Array.from(dropdown.selectEl.options).some(option => option.value === color)) dropdown.addOption(color, "自定义颜色");
 					dropdown.setValue(color);
 				};
 				syncPaperDropdown(this.options.paperColor);
@@ -412,14 +416,14 @@ class NativeInsertPageModal extends Modal {
 			});
 
 		contentEl.createDiv("modal-button-container", (buttonContainer) => {
-			buttonContainer.createEl("button", { cls: "mod-cta", text: "Insert page" }, (button) => {
+			buttonContainer.createEl("button", { cls: "mod-cta", text: "插入页面" }, (button) => {
 				button.addEventListener("click", () => {
 					const options = { ...this.options };
 					this.close();
 					this.onSubmit(options);
 				});
 			});
-			buttonContainer.createEl("button", { text: "Cancel" }, (button) => {
+			buttonContainer.createEl("button", { text: "取消" }, (button) => {
 				button.addEventListener("click", () => this.close());
 			});
 		});
@@ -437,7 +441,7 @@ class ImageInsertModal extends Modal {
 
 	constructor(app: App, private readonly onSubmit: (file: File) => void) {
 		super(app);
-		this.titleEl.setText("Insert photo");
+		this.titleEl.setText("插入图片");
 		this.modalEl.addClass("pdf-native-annotator-native-modal");
 	}
 
@@ -445,30 +449,30 @@ class ImageInsertModal extends Modal {
 		const { contentEl } = this;
 		contentEl.empty();
 		contentEl.createEl("p", {
-			text: "Choose an image file to place on the current PDF or template page.",
+			text: "选择一个图片文件，放到当前 PDF 页或模板页上。",
 			cls: "setting-item-description"
 		});
 
 		const fileSetting = new Setting(contentEl)
-			.setName("Photo")
-			.setDesc("PNG, JPEG, WebP, GIF, or any image format supported by Obsidian.");
+			.setName("图片")
+			.setDesc("PNG、JPEG、WebP、GIF，或 Obsidian 支持的任何图片格式。");
 		const input = fileSetting.controlEl.createEl("input", { type: "file" });
 		input.accept = "image/*";
 		input.addEventListener("change", () => {
 			this.selectedFile = input.files?.[0] ?? null;
-			this.statusEl?.setText(this.selectedFile ? this.selectedFile.name : "No image selected");
+			this.statusEl?.setText(this.selectedFile ? this.selectedFile.name : "未选择图片");
 			if (this.insertButtonEl) {
 				this.insertButtonEl.disabled = !this.selectedFile;
 			}
 		});
 
 		this.statusEl = contentEl.createEl("p", {
-			text: "No image selected",
+			text: "未选择图片",
 			cls: "setting-item-description"
 		});
 
 		contentEl.createDiv("modal-button-container", (buttonContainer) => {
-			this.insertButtonEl = buttonContainer.createEl("button", { cls: "mod-cta", text: "Insert" }, (button) => {
+			this.insertButtonEl = buttonContainer.createEl("button", { cls: "mod-cta", text: "插入" }, (button) => {
 				button.disabled = true;
 				button.addEventListener("click", () => {
 					if (!this.selectedFile) {
@@ -479,7 +483,7 @@ class ImageInsertModal extends Modal {
 					this.onSubmit(file);
 				});
 			});
-			buttonContainer.createEl("button", { text: "Cancel" }, (button) => {
+			buttonContainer.createEl("button", { text: "取消" }, (button) => {
 				button.addEventListener("click", () => this.close());
 			});
 		});
@@ -631,7 +635,7 @@ class NativePdfAnnotatorSession {
 	private floatingToolbarOffset: { right: number; top: number } = { right: 12, top: 8 };
 	private floatingToolbarDrag: { startX: number; startY: number; startRight: number; startTop: number } | null = null;
 	private currentTextFontFamily = TEXT_FONT_FAMILIES[0];
-	private currentTextFontSize = 18;
+	private currentTextFontSize = 35;
 	private currentTextColor = TEXT_COLOR_PRESETS[0].color;
 	private currentTextFontWeight: TextFontWeight = "normal";
 	private currentTextFontStyle: TextFontStyle = "normal";
@@ -715,7 +719,7 @@ class NativePdfAnnotatorSession {
 			this.focusedRegionPage = null;
 			this.drawAllAnnotations();
 		}, 5000);
-		this.refreshStatus(`Focused region on page ${page}`);
+		this.refreshStatus(`已定位到第 ${page} 页的区域`);
 	}
 
 	focusPage(page: number): void {
@@ -752,7 +756,7 @@ class NativePdfAnnotatorSession {
 				this.commitActiveInkBeforeLayoutRefresh();
 				this.finishSessionInlineTextEditor(true);
 				await this.flushSave();
-				if (this.isDirty) { throw new Error("Save the current annotations before switching PDFs."); }
+				if (this.isDirty) { throw new Error("切换 PDF 之前，请先保存当前批注。"); }
 				const loadInfo = await this.store.loadWithInfo(nextFile);
 				if (generation !== this.attachmentGeneration || this.getPdfFile()?.path !== nextFile.path) { return; }
 				this.file = nextFile;
@@ -786,8 +790,8 @@ class NativePdfAnnotatorSession {
 				const temporaryPageCount = this.getTemporarySidecarPageCount();
 				this.refreshStatus(
 					temporaryPageCount > 0
-						? `${temporaryPageCount} temporary template page${temporaryPageCount === 1 ? "" : "s"} found. Export when you want a finished PDF.`
-						: `Attached to native PDF viewer: ${nextFile.name}`,
+						? `发现 ${temporaryPageCount} 张临时模板页。需要成品 PDF 时请导出。`
+						: `已连接到原生 PDF 查看器：${nextFile.name}`,
 					temporaryPageCount > 0 ? 8000 : 2500
 				);
 			}
@@ -838,10 +842,10 @@ class NativePdfAnnotatorSession {
 				this.isDirty = revision !== this.documentRevision;
 				if (!this.isDirty) this.refreshSaveState("saved");
 			} catch (error) {
-				this.refreshSaveState("failed", error instanceof Error ? error.message : "Annotation save failed");
+				this.refreshSaveState("failed", error instanceof Error ? error.message : "批注保存失败");
 				console.error("freedraw-pdf: failed to save", error);
-				new Notice(error instanceof Error ? error.message : "Could not save PDF annotations.");
-				this.refreshStatus(error instanceof Error ? `Unsaved changes â€” ${error.message}` : "Unsaved changes â€” save failed", 12000);
+				new Notice(error instanceof Error ? error.message : "无法保存 PDF 批注。");
+				this.refreshStatus(error instanceof Error ? `有未保存的更改：${error.message}` : "有未保存的更改：保存失败", 12000);
 				await this.preserveFailedSave(file, document);
 				if (error instanceof Error && /Annotation data changed/.test(error.message)) {
 					try {
@@ -851,7 +855,7 @@ class NativePdfAnnotatorSession {
 							if (!this.isDirty) this.refreshSaveState("saved");
 							continue;
 						}
-					} catch (conflictError) { new Notice(conflictError instanceof Error ? conflictError.message : "Both annotation versions were kept."); }
+					} catch (conflictError) { new Notice(conflictError instanceof Error ? conflictError.message : "两个批注版本都已保留。"); }
 				}
 				return;
 			}
@@ -861,10 +865,10 @@ class NativePdfAnnotatorSession {
 	private async preserveFailedSave(file: TFile, document: AnnotationDocument): Promise<void> {
 		try {
 			const path = await this.store.saveRecoveryCopy(file, document);
-			if (path) new Notice(`Unsaved annotations preserved in ${path}`, 12000);
+			if (path) new Notice(`未保存的批注已保留在 ${path}`, 12000);
 		} catch (error) {
 			console.error("freedraw-pdf: recovery save failed", error);
-			new Notice("Annotation save and recovery failed. Check available storage and vault access.", 12000);
+			new Notice("批注保存和恢复都失败了。请检查存储空间和库访问权限。", 12000);
 		}
 	}
 
@@ -937,6 +941,7 @@ class NativePdfAnnotatorSession {
 			return;
 		}
 		this.ownerWindow.addEventListener("keydown", this.handleSessionKeyDown, { capture: true });
+		this.ownerWindow.addEventListener("paste", this.handleSessionPaste, { capture: true });
 		this.ownerWindow.addEventListener("keyup", this.handleSessionKeyUp);
 		this.ownerWindow.addEventListener("blur", this.handleSessionWindowBlur);
 		this.ownerWindow.addEventListener("focus", this.handleSessionWindowFocus);
@@ -948,6 +953,7 @@ class NativePdfAnnotatorSession {
 			return;
 		}
 		this.ownerWindow.removeEventListener("keydown", this.handleSessionKeyDown, { capture: true });
+		this.ownerWindow.removeEventListener("paste", this.handleSessionPaste, { capture: true });
 		this.ownerWindow.removeEventListener("keyup", this.handleSessionKeyUp);
 		this.ownerWindow.removeEventListener("blur", this.handleSessionWindowBlur);
 		this.ownerWindow.removeEventListener("focus", this.handleSessionWindowFocus);
@@ -970,7 +976,7 @@ class NativePdfAnnotatorSession {
 		this.syncPages();
 		this.forceRedrawVisibleAnnotations();
 		this.scheduleLayoutRefresh();
-		this.refreshStatus(this.annotationMode ? "Annotation mode enabled" : "Annotation mode disabled");
+		this.refreshStatus(this.annotationMode ? "已开启批注模式" : "已关闭批注模式");
 	}
 
 	async copyCurrentPageLink(): Promise<void> {
@@ -980,33 +986,33 @@ class NativePdfAnnotatorSession {
 
 	private async copyPageLink(pageNumber: number): Promise<void> {
 		if (!this.file) {
-			new Notice("Open a PDF first.");
+			new Notice("请先打开一个 PDF。");
 			return;
 		}
 		const link = this.buildPageLink(pageNumber);
 		try {
 			await writeClipboardText(link);
-			new Notice(`Copied page ${pageNumber} link.`);
-			this.refreshStatus(`Copied ${link}`);
+			new Notice(`已复制第 ${pageNumber} 页链接。`);
+			this.refreshStatus(`已复制 ${link}`);
 		} catch (error) {
 			console.error("freedraw-pdf: failed to copy link", error);
-			new Notice(`Copy failed. Link: ${link}`);
+			new Notice(`复制失败。链接：${link}`);
 		}
 	}
 
 	async copyCurrentPageEmbedBlock(): Promise<void> {
 		if (!this.file) {
-			new Notice("Open a PDF first.");
+			new Notice("请先打开一个 PDF。");
 			return;
 		}
 		this.syncCurrentPageForPageAction();
 		await this.plugin.copyAnnotatedPdfEmbedBlock(this.file, this.currentPage);
-		this.refreshStatus(`Copied annotated embed for page ${this.currentPage}`);
+		this.refreshStatus(`已复制第 ${this.currentPage} 页的批注嵌入`);
 	}
 
 	async openAnnotationDataJson(): Promise<void> {
 		if (!this.file) {
-			new Notice("Open a PDF first.");
+			new Notice("请先打开一个 PDF。");
 			return;
 		}
 		await this.flushSave();
@@ -1014,15 +1020,15 @@ class NativePdfAnnotatorSession {
 		const sidecar = this.plugin.app.vault.getAbstractFileByPath(sidecarPath);
 		if (sidecar instanceof TFile) {
 			await this.plugin.app.workspace.getLeaf(true).openFile(sidecar);
-			this.refreshStatus(`Opened ${sidecar.name}`);
+			this.refreshStatus(`已打开 ${sidecar.name}`);
 			return;
 		}
 		if (await this.plugin.app.vault.adapter.exists(sidecarPath)) {
 			await this.plugin.app.workspace.openLinkText(sidecarPath, "", true);
-			this.refreshStatus(`Opened ${sidecarPath}`);
+			this.refreshStatus(`已打开 ${sidecarPath}`);
 			return;
 		}
-		new Notice("Annotation data JSON does not exist yet.");
+		new Notice("批注数据 JSON 还不存在。");
 	}
 
 	private shouldShowRelinkAnnotationDataAction(): boolean {
@@ -1035,12 +1041,12 @@ class NativePdfAnnotatorSession {
 	async restoreAnnotationDataFromJson(): Promise<void> {
 		if (!this.file) return;
 		await this.flushSave();
-		if (this.isDirty) { new Notice("Resolve the unsaved annotations before restoring another file."); return; }
+		if (this.isDirty) { new Notice("请先处理未保存的批注，再恢复其他文件。"); return; }
 		const file = this.file;
 		const candidates = await this.store.getRestoreCandidates(file);
-		if (!candidates.length) { new Notice(`No related recovery JSON files found in ${file.parent?.path || "the vault root"} for ${file.name}.`); return; }
-		const selected = await chooseAnnotationFile(this.plugin.app, "Recover annotations from JSON",
-			`Replace the annotation layer for ${file.name} with an earlier saved copy. These files are in ${file.parent?.path || "the vault root"} and match this PDF's name or recorded path. Current data is backed up first. Use Combine JSON to add missing strokes instead.`, candidates);
+		if (!candidates.length) { new Notice(`在 ${file.parent?.path || "库根目录"} 中没有找到 ${file.name} 的相关恢复 JSON。`); return; }
+		const selected = await chooseAnnotationFile(this.plugin.app, "从 JSON 恢复批注",
+			`用较早保存的副本替换 ${file.name} 的批注层。这些文件位于 ${file.parent?.path || "库根目录"}，与这份 PDF 的名称或记录的路径相符。当前数据会先备份。如果只想补回缺失的笔迹，请改用「合并 JSON」。`, candidates);
 		if (!selected || this.file !== file) return;
 		try {
 			const info = await this.store.loadWithInfo(file, selected);
@@ -1055,8 +1061,8 @@ class NativePdfAnnotatorSession {
 			this.syncPages();
 			this.drawAllAnnotations();
 			this.plugin.refreshAnnotatedEmbedsForPath(file.path);
-			new Notice("Annotation data restored.");
-		} catch (error) { new Notice(error instanceof Error ? error.message : "Could not restore annotation data."); }
+			new Notice("批注数据已恢复。");
+		} catch (error) { new Notice(error instanceof Error ? error.message : "无法恢复批注数据。"); }
 	}
 
 	async refreshCombinedAnnotationData(): Promise<void> {
@@ -1082,7 +1088,7 @@ class NativePdfAnnotatorSession {
 
 	async relinkAnnotationDataToCurrentPdf(): Promise<void> {
 		if (!this.file || !this.annotationDocument) {
-			new Notice("Open a PDF first.");
+			new Notice("请先打开一个 PDF。");
 			return;
 		}
 		const previousSidecarPath = this.annotationLoadInfo?.sidecarPath ?? null;
@@ -1097,15 +1103,15 @@ class NativePdfAnnotatorSession {
 				sourcePdfPath: this.file.path
 			};
 			this.isDirty = false;
-			this.refreshStatus(`Relinked annotations to ${this.file.name}`);
-			new Notice("Annotation data relinked to the current PDF.");
+			this.refreshStatus(`已将批注重新关联到 ${this.file.name}`);
+			new Notice("批注数据已重新关联到当前 PDF。");
 			this.plugin.refreshAnnotatedEmbedsForPath(this.file.path);
 			if (previousSidecarPath) {
 				this.plugin.refreshAnnotatedEmbedsForPath(previousSidecarPath);
 			}
 		} catch (error) {
 			console.error("freedraw-pdf: failed to relink annotation data", error);
-			new Notice("Could not relink annotation data JSON.");
+			new Notice("无法重新关联批注数据 JSON。");
 		}
 	}
 
@@ -1116,7 +1122,7 @@ class NativePdfAnnotatorSession {
 
 	private insertPhotoOnCurrentPage(): void {
 		if (!this.annotationDocument) {
-			new Notice("Open an annotated PDF first.");
+			new Notice("请先打开一个已批注的 PDF。");
 			return;
 		}
 		this.syncCurrentPageForPageAction();
@@ -1125,9 +1131,25 @@ class NativePdfAnnotatorSession {
 		}).open();
 	}
 
+	private async pasteSystemClipboardImage(): Promise<boolean> {
+		try {
+			const items = await this.ownerWindow.navigator.clipboard.read();
+			for (const item of items) {
+				const type = item.types.find((entry) => entry.startsWith("image/"));
+				if (!type) continue;
+				const blob = await item.getType(type);
+				await this.insertPhotoFileOnCurrentPage(new File([blob], `image.${type.split("/")[1] || "png"}`, { type }));
+				return true;
+			}
+		} catch (error) {
+			console.debug("freedraw-pdf: system clipboard image unavailable", error);
+		}
+		return false;
+	}
+
 	private async insertPhotoFileOnCurrentPage(file: File, placementPoint?: AnnotationPoint | null): Promise<void> {
 		if (!this.annotationDocument) {
-			new Notice("Open an annotated PDF first.");
+			new Notice("请先打开一个已批注的 PDF。");
 			return;
 		}
 		try {
@@ -1135,13 +1157,13 @@ class NativePdfAnnotatorSession {
 			await this.insertImageDataUrlOnCurrentPage(dataUrl, file.name, placementPoint);
 		} catch (error) {
 			console.error("freedraw-pdf: failed to insert photo", error);
-			new Notice("Could not insert the selected image.");
+			new Notice("无法插入所选图片。");
 		}
 	}
 
 	private async insertImageDataUrlOnCurrentPage(dataUrl: string, name: string, placementPoint?: AnnotationPoint | null): Promise<void> {
 		if (!this.annotationDocument) {
-			new Notice("Open an annotated PDF first.");
+			new Notice("请先打开一个已批注的 PDF。");
 			return;
 		}
 		try {
@@ -1174,37 +1196,37 @@ class NativePdfAnnotatorSession {
 			this.toolState.setActiveTool("select");
 			this.selectedTarget = { kind: "image", id: imageItem.id, page: imageItem.page };
 			this.selectedTargets = [this.selectedTarget];
-			this.markDirtyAndRedraw(`Inserted ${name}`);
+			this.markDirtyAndRedraw(`已插入 ${name}`);
 		} catch (error) {
 			console.error("freedraw-pdf: failed to insert photo", error);
-			new Notice("Could not insert the selected image.");
+			new Notice("无法插入所选图片。");
 		}
 	}
 
 	private readFileAsDataUrl(file: File): Promise<string> {
 		return new Promise((resolve, reject) => {
 			const reader = new FileReader();
-			reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Could not read image file."));
-			reader.onerror = () => reject(reader.error ?? new Error("Could not read image file."));
+			reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("无法读取图片文件。"));
+			reader.onerror = () => reject(reader.error ?? new Error("无法读取图片文件。"));
 			reader.readAsDataURL(file);
 		});
 	}
 
 	private getImageDataUrlDimensions(dataUrl: string): Promise<{ width: number; height: number }> {
 		if (!isEmbeddedImageDataUrl(dataUrl)) {
-			return Promise.reject(new Error("Image annotations must contain embedded image data."));
+			return Promise.reject(new Error("图片批注必须包含内嵌的图片数据。"));
 		}
 		return new Promise((resolve, reject) => {
 			const image = new Image();
 			image.onload = () => resolve({ width: image.naturalWidth || 1, height: image.naturalHeight || 1 });
-			image.onerror = () => reject(new Error("Could not load selected image."));
+			image.onerror = () => reject(new Error("无法加载所选图片。"));
 			image.src = dataUrl;
 		});
 	}
 
 	async exportAnnotatedMixedDocumentPdf(): Promise<TFile | null> {
 		if (!this.file || !this.annotationDocument) {
-			new Notice("Open a PDF first.");
+			new Notice("请先打开一个 PDF。");
 			return null;
 		}
 		if (this.realPdfPageCount <= 0) {
@@ -1212,11 +1234,11 @@ class NativePdfAnnotatorSession {
 		}
 		const entries = this.getMixedPageEntries();
 		if (entries.length === 0) {
-			new Notice("No pages available to export.");
+			new Notice("没有可导出的页面。");
 			return null;
 		}
 		await this.flushSave();
-		this.refreshStatus("Exporting annotated mixed PDF...", 6000);
+		this.refreshStatus("正在导出带批注的混合 PDF…", 6000);
 		const outputFile = await exportAnnotatedMixedDocumentPdf(
 			this.plugin.app,
 			this.file,
@@ -1225,7 +1247,7 @@ class NativePdfAnnotatorSession {
 			this.realPdfPageCount
 		);
 		if (outputFile) {
-			this.refreshStatus(`Exported ${outputFile.name}`);
+			this.refreshStatus(`已导出 ${outputFile.name}`);
 			await this.plugin.openPdfFileAtPage(outputFile, 1);
 		}
 		return outputFile;
@@ -1233,7 +1255,7 @@ class NativePdfAnnotatorSession {
 
 	async materializeNativeMixedWorkingPdf(): Promise<TFile | null> {
 		if (!this.file || !this.annotationDocument) {
-			new Notice("Open a PDF first.");
+			new Notice("请先打开一个 PDF。");
 			return null;
 		}
 		if (this.realPdfPageCount <= 0) {
@@ -1241,17 +1263,17 @@ class NativePdfAnnotatorSession {
 		}
 		const entries = this.getMixedPageEntries();
 		if (entries.length === 0) {
-			new Notice("No pages available to materialize.");
+			new Notice("没有可生成的页面。");
 			return null;
 		}
 		await this.flushSave();
-		this.refreshStatus("Creating native mixed working PDF...", 8000);
+		this.refreshStatus("正在创建原生混合工作 PDF…", 8000);
 		return this.createNativeWorkingPdfFromDocument(this.annotationDocument, entries, this.currentPage);
 	}
 
 	openNativeTemplatePageInsertModal(position: "before" | "after"): void {
 		if (!this.file || !this.annotationDocument) {
-			new Notice("Open a PDF first.");
+			new Notice("请先打开一个 PDF。");
 			return;
 		}
 		if (this.realPdfPageCount <= 0) {
@@ -1264,7 +1286,7 @@ class NativePdfAnnotatorSession {
 
 	openTemplatePageInsertModal(position: "before" | "after"): void {
 		if (!this.file || !this.annotationDocument) {
-			new Notice("Open a PDF first.");
+			new Notice("请先打开一个 PDF。");
 			return;
 		}
 		if (this.realPdfPageCount <= 0) {
@@ -1277,7 +1299,7 @@ class NativePdfAnnotatorSession {
 
 	private openNativeTemplatePageInsertModalAtLocation(position: "before" | "after", location: NativeInsertPageLocation, defaultsOverride?: NativeInsertPageOptions): void {
 		if (!this.file || !this.annotationDocument) {
-			new Notice("Open a PDF first.");
+			new Notice("请先打开一个 PDF。");
 			return;
 		}
 		const defaults = defaultsOverride ?? this.getNativeInsertPageDefaults(position, location);
@@ -1294,7 +1316,7 @@ class NativePdfAnnotatorSession {
 
 	private openTemplatePageInsertModalAtLocation(position: "before" | "after", location: NativeInsertPageLocation, defaultsOverride?: NativeInsertPageOptions): void {
 		if (!this.file || !this.annotationDocument) {
-			new Notice("Open a PDF first.");
+			new Notice("请先打开一个 PDF。");
 			return;
 		}
 		const defaults = defaultsOverride ?? this.getNativeInsertPageDefaults(position, location);
@@ -1321,7 +1343,7 @@ class NativePdfAnnotatorSession {
 	private getNativeInsertPageDefaults(position: "before" | "after", location = this.getNativeInsertPageLocation(position)): NativeInsertPageOptions {
 		const currentSyntheticPage = this.getCurrentSyntheticPage();
 		return {
-			title: `Inserted page ${position} ${location.anchorLabel}`,
+			title: `已在${location.anchorLabel}${position === "before" ? "之前" : "之后"}插入页面`,
 			template: currentSyntheticPage?.template ?? "ruled",
 			pageSize: currentSyntheticPage?.pageSize ?? "a4",
 			paperColor: currentSyntheticPage?.paperColor ?? "#fffdf7"
@@ -1330,13 +1352,16 @@ class NativePdfAnnotatorSession {
 
 	private getQuickAddPageOptions(location: NativeInsertPageLocation): NativeInsertPageOptions {
 		const defaults = this.getNativeInsertPageDefaults("after", location);
-		const settings = this.plugin.getQuickAddPageSettings();
-		const pages = this.getAppendedPages();
-		const document = this.annotationDocument;
-		const inherit = document?.latestPageStyle ?? pages[pages.length - 1] ??
-			(document?.nativePageTemplatesEditable ? document.pdfPageTemplates?.[document.pdfPageTemplates.length - 1] : undefined);
-		return { ...defaults, template: inherit?.template ?? settings.template,
-			paperColor: inherit?.paperColor ?? settings.paperColor, pageSize: inherit?.pageSize ?? defaults.pageSize };
+		// Quick add: white blank page with the same proportions as the page being viewed.
+		return { ...defaults, template: "blank", paperColor: "#ffffff", pageSize: "a4", customSize: this.getCurrentPageProportions() };
+	}
+
+	private getCurrentPageProportions(): { width: number; height: number } | undefined {
+		const synthetic = this.getCurrentSyntheticPage();
+		if (synthetic) return { ...getNotebookPageSizeDimensions(synthetic.pageSize, synthetic.customSize) };
+		const surface = this.pageSurfaces.get(this.currentPage);
+		if (surface && surface.lastWidth > 0 && surface.lastHeight > 0) return { width: 920, height: 920 * surface.lastHeight / surface.lastWidth };
+		return undefined;
 	}
 
 	private recordLatestPageStyle(style: Pick<PdfPageTemplate, "template" | "paperColor" | "pageSize">): void {
@@ -1351,7 +1376,7 @@ class NativePdfAnnotatorSession {
 			return {
 				insertIndex: position === "before" ? currentSyntheticIndex : currentSyntheticIndex + 1,
 				anchor,
-				anchorLabel: currentSyntheticPage.title.trim() || `added page ${this.currentPage}`
+				anchorLabel: currentSyntheticPage.title.trim() || `添加页 ${this.currentPage}`
 			};
 		}
 		if (position === "before") {
@@ -1359,14 +1384,14 @@ class NativePdfAnnotatorSession {
 			return {
 				insertIndex: this.findSyntheticInsertIndexAfterPdfPage(anchor),
 				anchor,
-				anchorLabel: `PDF page ${this.currentPage}`
+				anchorLabel: `PDF 第 ${this.currentPage} 页`
 			};
 		}
 		const anchor = clamp(this.currentPage, 0, Math.max(0, this.realPdfPageCount));
 		return {
 			insertIndex: this.findFirstSyntheticInsertIndexAfterPdfPage(anchor),
 			anchor,
-			anchorLabel: `PDF page ${this.currentPage}`
+			anchorLabel: `PDF 第 ${this.currentPage} 页`
 		};
 	}
 
@@ -1376,7 +1401,7 @@ class NativePdfAnnotatorSession {
 
 	private async insertNativeTemplatePageAtLocation(location: NativeInsertPageLocation, options?: NativeInsertPageOptions): Promise<TFile | null> {
 		if (!this.file || !this.annotationDocument) {
-			new Notice("Open a PDF first.");
+			new Notice("请先打开一个 PDF。");
 			return null;
 		}
 		if (this.realPdfPageCount <= 0) {
@@ -1387,7 +1412,7 @@ class NativePdfAnnotatorSession {
 			sourceDocument.appendedPages = [];
 		}
 		const fallbackOptions: NativeInsertPageOptions = {
-			title: `Inserted page after ${location.anchorLabel}`,
+			title: `已在 ${location.anchorLabel} 之后插入页面`,
 			template: this.getCurrentSyntheticPage()?.template ?? "ruled",
 			pageSize: this.getCurrentSyntheticPage()?.pageSize ?? "a4",
 			paperColor: this.getCurrentSyntheticPage()?.paperColor ?? "#fffdf7"
@@ -1409,7 +1434,7 @@ class NativePdfAnnotatorSession {
 		);
 		const entries = this.getMixedPageEntries(sourceDocument);
 		await this.flushSave();
-		this.refreshStatus("Creating native PDF with inserted page...", 8000);
+		this.refreshStatus("正在创建插入了新页的原生 PDF…", 8000);
 		return this.createNativeWorkingPdfFromDocument(sourceDocument, entries, insertedPageNumber);
 	}
 
@@ -1419,7 +1444,7 @@ class NativePdfAnnotatorSession {
 		targetPage: number
 	): Promise<TFile | null> {
 		if (!this.file) {
-			new Notice("Open a PDF first.");
+			new Notice("请先打开一个 PDF。");
 			return null;
 		}
 		const result = await createNativeMixedWorkingPdf(
@@ -1451,20 +1476,20 @@ class NativePdfAnnotatorSession {
 		nextDocument.updatedAt = new Date().toISOString();
 		await this.store.save(result.file, nextDocument);
 		const mappedTargetPage = mapPage(targetPage);
-		this.refreshStatus(`Created ${result.file.name}`);
+		this.refreshStatus(`已创建 ${result.file.name}`);
 		await this.plugin.openPdfFileAtPage(result.file, mappedTargetPage);
 		return result.file;
 	}
 
 	private async exportPageSnapshot(pageNumber: number): Promise<TFile | null> {
 		if (!this.file) {
-			new Notice("Open a PDF first.");
+			new Notice("请先打开一个 PDF。");
 			return null;
 		}
 
 		const surface = this.pageSurfaces.get(pageNumber);
 		if (!surface) {
-			new Notice("That page is not ready to export yet.");
+			new Notice("这一页还不能导出。");
 			return null;
 		}
 
@@ -1473,20 +1498,20 @@ class NativePdfAnnotatorSession {
 			? this.getAppendedPages()[this.getSyntheticPageIndex(pageNumber)] ?? null
 			: null;
 		if (!isHtmlCanvasElement(pdfCanvas) && !syntheticPage) {
-			new Notice("Could not find the native PDF page canvas for export.");
+			new Notice("找不到用于导出的原生 PDF 页面画布。");
 			return null;
 		}
 
 		const exportCanvas = createEl("canvas");
 		const ratio = this.ownerWindow.devicePixelRatio || 1;
-		const syntheticSize = syntheticPage ? getNotebookPageRenderDimensions(syntheticPage.pageSize, BLANK_PDF_EXPORT_WIDTH_PX) : null;
+		const syntheticSize = syntheticPage ? getNotebookPageRenderDimensions(syntheticPage.pageSize, BLANK_PDF_EXPORT_WIDTH_PX, syntheticPage.customSize) : null;
 		const exportWidth = isHtmlCanvasElement(pdfCanvas) ? pdfCanvas.width : syntheticSize?.width ?? Math.max(1, Math.floor(surface.lastWidth * ratio));
 		const exportHeight = isHtmlCanvasElement(pdfCanvas) ? pdfCanvas.height : syntheticSize?.height ?? Math.max(1, Math.floor(surface.lastHeight * ratio));
 		exportCanvas.width = exportWidth;
 		exportCanvas.height = exportHeight;
 		const context = exportCanvas.getContext("2d");
 		if (!context) {
-			new Notice("Could not create export canvas.");
+			new Notice("无法创建导出画布。");
 			return null;
 		}
 
@@ -1513,8 +1538,8 @@ class NativePdfAnnotatorSession {
 
 		const buffer = dataUrlToArrayBuffer(exportCanvas.toDataURL("image/png"));
 		const imageFile = await this.plugin.app.vault.createBinary(imagePath, buffer);
-		this.refreshStatus(`Exported ${imageFile.name}`);
-		new Notice(`Exported ${imageFile.name}`);
+		this.refreshStatus(`已导出 ${imageFile.name}`);
+		new Notice(`已导出 ${imageFile.name}`);
 		return imageFile;
 	}
 
@@ -1525,7 +1550,7 @@ class NativePdfAnnotatorSession {
 	async exportSelectionSnapshot(): Promise<TFile | null> {
 		const region = this.getSelectionRegion();
 		if (!region) {
-			new Notice("Drag a box region first.");
+			new Notice("请先拖出一个矩形区域。");
 			return null;
 		}
 
@@ -1533,7 +1558,7 @@ class NativePdfAnnotatorSession {
 		const bounds = region.rect;
 		const surface = this.pageSurfaces.get(selectionPage);
 		if (!surface) {
-			new Notice("Selection snapshot is not ready yet.");
+			new Notice("选区快照还没准备好。");
 			return null;
 		}
 
@@ -1541,11 +1566,11 @@ class NativePdfAnnotatorSession {
 		const syntheticPage = this.getSyntheticPageIndex(selectionPage) >= 0
 			? this.getAppendedPages()[this.getSyntheticPageIndex(selectionPage)] ?? null : null;
 		if (!isHtmlCanvasElement(pdfCanvas) && !syntheticPage) {
-			new Notice("Could not find the native PDF page canvas for selection export.");
+			new Notice("找不到用于导出选区的原生 PDF 页面画布。");
 			return null;
 		}
 
-		const syntheticSize = syntheticPage ? getNotebookPageRenderDimensions(syntheticPage.pageSize, BLANK_PDF_EXPORT_WIDTH_PX) : null;
+		const syntheticSize = syntheticPage ? getNotebookPageRenderDimensions(syntheticPage.pageSize, BLANK_PDF_EXPORT_WIDTH_PX, syntheticPage.customSize) : null;
 		const pageWidth = isHtmlCanvasElement(pdfCanvas) ? pdfCanvas.width : syntheticSize?.width ?? surface.lastWidth;
 		const pageHeight = isHtmlCanvasElement(pdfCanvas) ? pdfCanvas.height : syntheticSize?.height ?? surface.lastHeight;
 		const cropLeft = Math.max(0, Math.floor(bounds.left * pageWidth) - 20);
@@ -1560,7 +1585,7 @@ class NativePdfAnnotatorSession {
 		exportCanvas.height = cropHeight;
 		const context = exportCanvas.getContext("2d");
 		if (!context) {
-			new Notice("Could not create selection export canvas.");
+			new Notice("无法创建选区导出画布。");
 			return null;
 		}
 
@@ -1583,7 +1608,7 @@ class NativePdfAnnotatorSession {
 
 		const file = this.file;
 		if (!file) {
-			new Notice("Open a PDF before exporting a selection snapshot.");
+			new Notice("导出选区快照前请先打开 PDF。");
 			return null;
 		}
 		const folderPrefix = file.parent?.path ? `${file.parent.path}/` : "";
@@ -1597,35 +1622,35 @@ class NativePdfAnnotatorSession {
 
 		const buffer = dataUrlToArrayBuffer(exportCanvas.toDataURL("image/png"));
 		const imageFile = await this.plugin.app.vault.createBinary(imagePath, buffer);
-		this.refreshStatus(`Exported ${imageFile.name}`);
-		new Notice(`Exported ${imageFile.name}`);
+		this.refreshStatus(`已导出 ${imageFile.name}`);
+		new Notice(`已导出 ${imageFile.name}`);
 		return imageFile;
 	}
 
 	async copySelectionRegionReference(): Promise<void> {
 		const reference = this.buildSelectionRegionReference();
 		if (!reference) {
-			new Notice("Drag a box region on one page first.");
+			new Notice("请先在某一页拖出一个矩形区域。");
 			return;
 		}
 		try {
 			await this.plugin.writeClipboardText(reference);
-			new Notice("Copied selection region reference.");
-			this.refreshStatus(`Copied ${reference}`);
+			new Notice("已复制选区引用。");
+			this.refreshStatus(`已复制 ${reference}`);
 		} catch (error) {
 			console.error("freedraw-pdf: failed to copy selection region reference", error);
-			new Notice(`Copy failed. Region: ${reference}`);
+			new Notice(`复制失败。区域：${reference}`);
 		}
 	}
 
 	async copySelectionAnnotatedEmbedBlock(): Promise<void> {
 		const region = this.getSelectionRegion();
 		if (!region) {
-			new Notice("Drag a box region on one page first.");
+			new Notice("请先在某一页拖出一个矩形区域。");
 			return;
 		}
 		await this.plugin.copyAnnotatedPdfEmbedBlock(region.file, region.page, region.rect);
-		this.refreshStatus(`Copied region embed for page ${region.page}`);
+		this.refreshStatus(`已复制第 ${region.page} 页的区域嵌入`);
 	}
 
 	getActiveRegionEmbedSource(): { file: TFile; page: number; rect: NormalizedRect } | null {
@@ -1634,13 +1659,13 @@ class NativePdfAnnotatorSession {
 
 	copySelectedTargets(asHandwriting = false): void {
 		if (!this.annotationDocument || this.selectedTargets.length === 0) {
-			this.refreshStatus("Nothing selected");
+			this.refreshStatus("未选中任何内容");
 			return;
 		}
 		if (!asHandwriting && this.plugin.getOcrSettings?.().copyHandwritingAsText && this.selectedTargets.every(target => target.kind === "stroke")) {
 			const text = recognisedSelectionText(this.annotationDocument, new Set(this.selectedTargets.map(target => target.id)));
 			if (!text) {
-				new Notice("Select a complete recognised passage, or use Copy handwriting.");
+				new Notice("请选择一整段已识别文字，或使用「复制手写」。");
 				return;
 			}
 			void this.copyRecognisedSelection(text);
@@ -1691,7 +1716,7 @@ class NativePdfAnnotatorSession {
 
 		this.plugin.setClipboard(payload);
 		const total = payload.strokes.length + payload.textItems.length + payload.shapes.length + (payload.imageItems?.length ?? 0);
-		this.refreshStatus(total === 1 ? "Copied selection" : `Copied ${total} selections`);
+		this.refreshStatus(total === 1 ? "已复制所选内容" : `已复制 ${total} 项所选内容`);
 	}
 
 	private async copyRecognisedSelection(text: string): Promise<void> {
@@ -1700,13 +1725,13 @@ class NativePdfAnnotatorSession {
 			await writeClipboardText(text);
 			if (this.plugin.getClipboardRevision() !== clipboardRevision) return;
 			this.plugin.setClipboard({ strokes: [], textItems: [], shapes: [], imageItems: [] });
-			this.refreshStatus("Copied recognised text");
-		} catch { new Notice("Could not copy recognised text to the clipboard."); }
+			this.refreshStatus("已复制识别出的文字");
+		} catch { new Notice("无法把识别文字复制到剪贴板。"); }
 	}
 
 	cutSelectedTargets(): void {
 		if (!this.annotationDocument || this.selectedTargets.length === 0) {
-			this.refreshStatus("Nothing selected");
+			this.refreshStatus("未选中任何内容");
 			return;
 		}
 		const strokeIds = new Set(this.selectedTargets.filter((target) => target.kind === "stroke").map((target) => target.id));
@@ -1751,7 +1776,7 @@ class NativePdfAnnotatorSession {
 		};
 		const total = payload.strokes.length + payload.textItems.length + payload.shapes.length + (payload.imageItems?.length ?? 0);
 		if (total === 0) {
-			this.refreshStatus("Nothing selected");
+			this.refreshStatus("未选中任何内容");
 			return;
 		}
 		this.plugin.setClipboard(payload);
@@ -1764,18 +1789,20 @@ class NativePdfAnnotatorSession {
 		this.selectedTarget = null;
 		this.selectedTargets = [];
 		this.lastSelectionRegion = null;
-		this.markDirtyAndRedraw(total === 1 ? "Cut selection" : `Cut ${total} selections`);
+		this.markDirtyAndRedraw(total === 1 ? "已剪切所选内容" : `已剪切 ${total} 项所选内容`);
 		this.refreshToolbar();
 	}
 
 	pasteClipboard(pasteInPlace = false): void {
 		if (!this.annotationDocument) {
-			this.refreshStatus("Open a PDF first.");
+			this.refreshStatus("请先打开一个 PDF。");
 			return;
 		}
 		const clipboard = this.plugin.getClipboard();
 		if (!clipboard) {
-			this.refreshStatus("Clipboard is empty");
+			void this.pasteSystemClipboardImage().then((pasted) => {
+				if (!pasted) this.refreshStatus("剪贴板是空的");
+			});
 			return;
 		}
 
@@ -1860,7 +1887,7 @@ class NativePdfAnnotatorSession {
 			if (this.undoStack.length > 0) {
 				this.undoStack.pop();
 			}
-			this.refreshStatus("Clipboard is empty");
+			this.refreshStatus("剪贴板是空的");
 			return;
 		}
 
@@ -1868,7 +1895,7 @@ class NativePdfAnnotatorSession {
 		this.selectedTargets = nextSelections;
 		this.selectedTarget = nextSelections[0] ?? null;
 		this.lastSelectionRegion = null;
-		this.markDirtyAndRedraw(nextSelections.length === 1 ? "Pasted selection" : `Pasted ${nextSelections.length} selections`);
+		this.markDirtyAndRedraw(nextSelections.length === 1 ? "已粘贴所选内容" : `已粘贴 ${nextSelections.length} 项所选内容`);
 		this.refreshToolbar();
 	}
 
@@ -1898,7 +1925,7 @@ class NativePdfAnnotatorSession {
 
 	deleteSelectedTargets(): void {
 		if (!this.annotationDocument || this.selectedTargets.length === 0) {
-			this.refreshStatus("Nothing selected");
+			this.refreshStatus("未选中任何内容");
 			return;
 		}
 
@@ -1917,7 +1944,7 @@ class NativePdfAnnotatorSession {
 		this.selectedTarget = null;
 		this.selectedTargets = [];
 		this.lastSelectionRegion = null;
-		this.markDirtyAndRedraw(removedCount === 1 ? "Deleted selection" : `Deleted ${removedCount} selections`);
+		this.markDirtyAndRedraw(removedCount === 1 ? "已删除所选内容" : `已删除 ${removedCount} 项所选内容`);
 		this.refreshToolbar();
 	}
 
@@ -1938,10 +1965,10 @@ class NativePdfAnnotatorSession {
 		this.dragAnchor = null;
 		this.drawPageAnnotations(this.currentPage);
 		this.refreshToolbar();
-		this.refreshStatus(nextSelections.length === 0 ? "No annotations on current page" : `Selected ${nextSelections.length} annotations on page ${this.currentPage}`);
+		this.refreshStatus(nextSelections.length === 0 ? "当前页没有批注" : `已选中第 ${this.currentPage} 页上的 ${nextSelections.length} 个批注`);
 	}
 
-	private clearSelection(message = "Selection cleared"): void {
+	private clearSelection(message = "已取消选择"): void {
 		if (this.selectedTargets.length === 0 && !this.selectedTarget && !this.lastSelectionRegion) {
 			return;
 		}
@@ -1973,7 +2000,7 @@ class NativePdfAnnotatorSession {
 		this.lastSelectionRegion = null;
 		this.drawPageAnnotations(page);
 		this.refreshToolbar();
-		this.refreshStatus("Region cleared");
+		this.refreshStatus("已清除区域");
 	}
 
 	private cancelActiveSessionInteraction(): boolean {
@@ -2020,7 +2047,7 @@ class NativePdfAnnotatorSession {
 			}
 			this.drawPageAnnotations(affectedPage);
 		}
-		this.refreshStatus("Cancelled interaction");
+		this.refreshStatus("已取消操作");
 		this.refreshToolPreviewFromLastPointer(false);
 		return true;
 	}
@@ -2041,12 +2068,12 @@ class NativePdfAnnotatorSession {
 		for (const page of pages) {
 			this.drawPageAnnotations(page);
 		}
-		this.refreshStatus(this.selectedTargets.length === 1 ? "Selection nudged" : `Nudged ${this.selectedTargets.length} selections`);
+		this.refreshStatus(this.selectedTargets.length === 1 ? "已微调所选内容位置" : `已微调 ${this.selectedTargets.length} 项所选内容位置`);
 	}
 
 	reorderSelectedTargets(direction: AnnotationReorderDirection): void {
 		if (!this.annotationDocument || this.selectedTargets.length === 0) {
-			this.refreshStatus("Nothing selected");
+			this.refreshStatus("未选中任何内容");
 			return;
 		}
 		const selectedByPage = new Map<number, Set<string>>();
@@ -2071,16 +2098,16 @@ class NativePdfAnnotatorSession {
 			if (this.undoStack.length > 0) {
 				this.undoStack.pop();
 			}
-			this.refreshStatus("Nothing selected");
+			this.refreshStatus("未选中任何内容");
 			return;
 		}
 		const message = direction === "front"
-			? "Brought selection to front"
+			? "已置于顶层"
 			: direction === "back"
-				? "Sent selection to back"
+				? "已置于底层"
 				: direction === "forward"
-					? "Brought selection forward"
-					: "Sent selection backward";
+					? "已上移一层"
+					: "已下移一层";
 		this.markDirtyAndRedraw(message);
 		this.refreshToolbar();
 	}
@@ -2106,7 +2133,7 @@ class NativePdfAnnotatorSession {
 
 	duplicateSelectedTargets(): void {
 		if (!this.annotationDocument || this.selectedTargets.length === 0) {
-			this.refreshStatus("Nothing selected");
+			this.refreshStatus("未选中任何内容");
 			return;
 		}
 
@@ -2187,7 +2214,7 @@ class NativePdfAnnotatorSession {
 			if (this.undoStack.length > 0) {
 				this.undoStack.pop();
 			}
-			this.refreshStatus("Nothing duplicated");
+			this.refreshStatus("没有可复制的内容");
 			return;
 		}
 
@@ -2195,14 +2222,14 @@ class NativePdfAnnotatorSession {
 		this.selectedTargets = nextSelections;
 		this.selectedTarget = nextSelections[0] ?? null;
 		this.lastSelectionRegion = null;
-		this.markDirtyAndRedraw(nextSelections.length === 1 ? "Duplicated selection" : `Duplicated ${nextSelections.length} selections`);
+		this.markDirtyAndRedraw(nextSelections.length === 1 ? "已复制所选内容" : `已复制 ${nextSelections.length} 项所选内容`);
 		this.refreshToolbar();
 	}
 
 	undo(): void {
 		if (!this.annotationDocument || this.undoStack.length === 0) {
-			this.showDrawingNotice("Nothing to undo", 1200);
-			this.refreshStatus("Nothing to undo");
+			this.showDrawingNotice("没有可撤销的操作", 1200);
+			this.refreshStatus("没有可撤销的操作");
 			return;
 		}
 		const entry = this.undoStack.pop();
@@ -2230,14 +2257,14 @@ class NativePdfAnnotatorSession {
 		this.scheduleSyncPages();
 		this.redrawHistoryChangeImmediately(affectedPage);
 		this.refreshToolbar();
-		this.showDrawingNotice(`Undo applied (${this.annotationDocument.strokes.length} strokes)`, 1600);
-		this.refreshStatus("Undo applied");
+		this.showDrawingNotice(`已撤销（共 ${this.annotationDocument.strokes.length} 笔）`, 1600);
+		this.refreshStatus("已撤销");
 	}
 
 	redo(): void {
 		if (!this.annotationDocument || this.redoStack.length === 0) {
-			this.showDrawingNotice("Nothing to redo", 1200);
-			this.refreshStatus("Nothing to redo");
+			this.showDrawingNotice("没有可重做的操作", 1200);
+			this.refreshStatus("没有可重做的操作");
 			return;
 		}
 		const entry = this.redoStack.pop();
@@ -2264,19 +2291,19 @@ class NativePdfAnnotatorSession {
 		this.scheduleSyncPages();
 		this.redrawHistoryChangeImmediately(affectedPage);
 		this.refreshToolbar();
-		this.showDrawingNotice(`Redo applied (${this.annotationDocument.strokes.length} strokes)`, 1600);
-		this.refreshStatus("Redo applied");
+		this.showDrawingNotice(`已重做（共 ${this.annotationDocument.strokes.length} 笔）`, 1600);
+		this.refreshStatus("已重做");
 	}
 
 	private undoFromToolbar(): void {
 		this.finishSessionInlineTextEditor(true);
-		this.forceFinishStalePdfInteraction("Finished active annotation before undo");
+		this.forceFinishStalePdfInteraction("撤销前已先完成当前批注");
 		this.undo();
 	}
 
 	private redoFromToolbar(): void {
 		this.finishSessionInlineTextEditor(true);
-		this.forceFinishStalePdfInteraction("Finished active annotation before redo");
+		this.forceFinishStalePdfInteraction("重做前已先完成当前批注");
 		this.redo();
 	}
 
@@ -2465,8 +2492,8 @@ class NativePdfAnnotatorSession {
 		const ordinal = this.getCurrentMixedPageOrdinal(entries);
 		input.min = "1";
 		input.max = String(Math.max(1, entries.length));
-		input.setAttribute("aria-label", "Mixed page");
-		input.setAttribute("aria-valuetext", `Page ${ordinal} of ${entries.length}`);
+		input.setAttribute("aria-label", "混合页");
+		input.setAttribute("aria-valuetext", `第 ${ordinal} 页，共 ${entries.length} 页`);
 		if (input.dataset.freedrawEditing !== "true") {
 			input.value = String(ordinal);
 		}
@@ -2722,7 +2749,7 @@ class NativePdfAnnotatorSession {
 
 		this.toolbarEl = createDiv();
 		this.toolbarEl.className = "pdf-native-annotator-toolbar";
-		this.toolbarEl.title = "Drag empty space to move the annotation toolbar";
+		this.toolbarEl.title = "拖动空白处可移动批注工具栏";
 		this.toolbarEl.addEventListener("pointerdown", this.handleToolbarDragStart);
 
 		this.statusEl = createDiv();
@@ -3046,7 +3073,7 @@ class NativePdfAnnotatorSession {
 		const rawRealPageEls = this.getRealPdfPageElements(viewContentEl);
 
 		if (rawRealPageEls.length === 0) {
-			this.refreshStatus(`Waiting for ${this.file.name} pages...`, 1800);
+			this.refreshStatus(`正在等待 ${this.file.name} 的页面…`, 1800);
 			return;
 		}
 
@@ -3344,7 +3371,8 @@ class NativePdfAnnotatorSession {
 				entry.template,
 				entry.pageSize,
 				entry.paperColor,
-				entry.annotationCount
+				entry.annotationCount,
+				this.getSyntheticPageById(entry.pageId ?? "")?.page.insertAfterPdfPage ?? null
 			]),
 			deleted: this.annotationDocument.deletedPdfPages ?? [],
 			removed: this.getRemovedPageEntries().length,
@@ -3408,13 +3436,13 @@ class NativePdfAnnotatorSession {
 			entryEl.className = "pdf-native-annotator-native-page-entry";
 			entryEl.dataset.pageNumber = String(entry.pageNumber);
 			entryEl.dataset.pageId = entry.pageId ?? "";
-			entryEl.setAttribute("aria-label", `${entry.label}. Added page. ${entry.detail}`);
+			entryEl.setAttribute("aria-label", `${entry.label}。已添加的页面。${entry.detail}`);
 			const thumbnailEl = entryEl.createDiv({ cls: "thumbnail pdf-native-annotator-native-thumbnail" });
 			thumbnailEl.dataset.pageLabel = String(entry.pageNumber);
 			thumbnailEl.dataset.loaded = "true";
 			thumbnailEl.tabIndex = 0;
 			thumbnailEl.setAttribute("role", "link");
-			thumbnailEl.setAttribute("aria-label", `Open ${entry.label}`);
+			thumbnailEl.setAttribute("aria-label", `打开 ${entry.label}`);
 			thumbnailEl.setCssProps({
 				"--thumbnail-width": thumbnailWidth,
 				"--thumbnail-height": thumbnailHeight,
@@ -3425,7 +3453,7 @@ class NativePdfAnnotatorSession {
 			}
 			const paperEl = thumbnailEl.createDiv({ cls: "pdf-native-annotator-native-thumbnail-paper" });
 			paperEl.createDiv({ cls: "pdf-native-annotator-native-thumbnail-pattern" });
-			const addedLabel = paperEl.createSpan({ cls: "pdf-native-annotator-native-thumbnail-kind", text: entry.template ? getNotebookTemplateLabel(entry.template) : "Added" });
+			const addedLabel = paperEl.createSpan({ cls: "pdf-native-annotator-native-thumbnail-kind", text: entry.template ? getNotebookTemplateLabel(entry.template) : "已添加" });
 			addedLabel.setAttribute("aria-hidden", "true");
 			if (entry.annotationCount > 0) {
 				thumbnailEl.createSpan({
@@ -3434,9 +3462,15 @@ class NativePdfAnnotatorSession {
 				});
 			}
 			const openPage = (): void => this.goToMixedPage(entry.pageNumber);
+			let suppressClick = false;
+			thumbnailEl.addEventListener("pointerdown", (event) => {
+				if (event.button !== 0) return;
+				this.beginThumbnailReorderDrag(event, entry, entryEl, thumbnailView, scrollParent, () => { suppressClick = true; this.ownerWindow.setTimeout(() => { suppressClick = false; }, 0); });
+			});
 			thumbnailEl.addEventListener("click", (event) => {
 				event.preventDefault();
 				event.stopPropagation();
+				if (suppressClick) return;
 				openPage();
 			});
 			thumbnailEl.addEventListener("keydown", (event) => {
@@ -3479,7 +3513,7 @@ class NativePdfAnnotatorSession {
 			footer.type = "button";
 			footer.className = "pdf-native-annotator-native-page-footer";
 			setIcon(footer, "files");
-			footer.createSpan({ cls: "pdf-native-annotator-native-page-footer-label", text: "Pages" });
+			footer.createSpan({ cls: "pdf-native-annotator-native-page-footer-label", text: "页面" });
 			footer.addEventListener("click", (event) => {
 				event.preventDefault();
 				event.stopPropagation();
@@ -3491,13 +3525,107 @@ class NativePdfAnnotatorSession {
 		const thumbnailInset = (parseFloat(referenceStyles?.borderLeftWidth ?? "0") || 0) + (parseFloat(referenceStyles?.paddingLeft ?? "0") || 0);
 		const thumbnailTopGap = (parseFloat(referenceStyles?.borderTopWidth ?? "0") || 0) + (parseFloat(referenceStyles?.paddingTop ?? "0") || 0);
 		footer.setCssProps({ "--freedraw-thumbnail-inset": `${thumbnailInset}px`, "--freedraw-thumbnail-top-gap": `${thumbnailTopGap}px` });
-		footer.setAttribute("aria-label", removedCount > 0 ? `Manage pages, ${removedCount} removed` : "Manage pages");
-		footer.title = removedCount > 0 ? `Pages - ${removedCount} removed` : "Pages";
+		footer.setAttribute("aria-label", removedCount > 0 ? `管理页面，已移除 ${removedCount} 页` : "管理页面");
+		footer.title = removedCount > 0 ? `页面 - 已移除 ${removedCount} 页` : "页面";
 		this.nativeMixedThumbnailSignature = signature;
 		this.updateNativeMixedPageThumbnailSelection();
 		if (restoreScroll && scrollParent) {
 			this.restoreNativeThumbnailScroll(scrollParent, previousScrollTop, previousScrollHeight);
 		}
+	}
+
+	/** Drag an added page in the left thumbnail strip to a new position between PDF pages. */
+	private beginThumbnailReorderDrag(start: PointerEvent, entry: MixedPageEntry, entryEl: HTMLElement, thumbnailView: HTMLElement, scrollParent: HTMLElement | null, onDragged: () => void): void {
+		const win = this.ownerWindow;
+		let dragging = false;
+		let target: { el: HTMLElement; pageNumber: number; after: boolean } | null = null;
+		const clearIndicator = (): void => {
+			thumbnailView.querySelectorAll(".freedraw-drop-before, .freedraw-drop-after").forEach((el) => el.classList.remove("freedraw-drop-before", "freedraw-drop-after"));
+		};
+		const resolveTarget = (event: PointerEvent): void => {
+			clearIndicator();
+			target = null;
+			const hit = this.ownerDocument.elementFromPoint(event.clientX, event.clientY);
+			let el = hit instanceof HTMLElement ? hit : null;
+			while (el && el.parentElement !== thumbnailView) el = el.parentElement;
+			if (!el || el === entryEl) return;
+			const pageNumber = el.classList.contains("pdf-native-annotator-native-page-entry")
+				? Number(el.dataset.pageNumber)
+				: this.getNativePdfThumbnailPageNumber(el);
+			if (!pageNumber) return;
+			const rect = el.getBoundingClientRect();
+			const after = event.clientY > rect.top + rect.height / 2;
+			target = { el, pageNumber, after };
+			el.classList.add(after ? "freedraw-drop-after" : "freedraw-drop-before");
+		};
+		const onMove = (event: PointerEvent): void => {
+			if (!dragging) {
+				if (Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY) < 6) return;
+				dragging = true;
+				entryEl.classList.add("freedraw-dragging");
+			}
+			event.preventDefault();
+			resolveTarget(event);
+			if (scrollParent) {
+				const bounds = scrollParent.getBoundingClientRect();
+				if (event.clientY < bounds.top + 36) scrollParent.scrollTop -= 14;
+				else if (event.clientY > bounds.bottom - 36) scrollParent.scrollTop += 14;
+			}
+		};
+		const finish = (event: PointerEvent | null): void => {
+			win.removeEventListener("pointermove", onMove, true);
+			win.removeEventListener("pointerup", onUp, true);
+			win.removeEventListener("pointercancel", onCancel, true);
+			entryEl.classList.remove("freedraw-dragging");
+			clearIndicator();
+			if (dragging) {
+				onDragged();
+				const drop = target;
+				if (event && drop && entry.pageId) this.moveAddedPageByDrop(entry.pageId, drop.pageNumber, drop.after);
+			}
+		};
+		const onUp = (event: PointerEvent): void => finish(event);
+		const onCancel = (): void => finish(null);
+		win.addEventListener("pointermove", onMove, true);
+		win.addEventListener("pointerup", onUp, true);
+		win.addEventListener("pointercancel", onCancel, true);
+	}
+
+	private moveAddedPageByDrop(pageId: string, targetPageNumber: number, after: boolean): void {
+		const document = this.annotationDocument;
+		if (!document) return;
+		this.finishSessionInlineTextEditor(true);
+		const pages = this.getAppendedPages();
+		const from = pages.findIndex((page) => page.id === pageId);
+		if (from < 0) return;
+		const entries = this.getMixedPageEntries();
+		const moving = entries.find((entry) => entry.pageId === pageId);
+		if (!moving || !entries.some((entry) => entry.pageNumber === targetPageNumber)) return;
+		const order = entries.filter((entry) => entry.pageId !== pageId);
+		const slot = order.findIndex((entry) => entry.pageNumber === targetPageNumber) + (after ? 1 : 0);
+		order.splice(slot, 0, moving);
+		let anchor = 0;
+		for (let index = slot - 1; index >= 0; index--) {
+			if (!order[index].isAdded) { anchor = order[index].pageNumber; break; }
+		}
+		const page = pages[from];
+		const previous = order[slot - 1];
+		const next = order[slot + 1];
+		const rest = pages.filter((candidate) => candidate !== page);
+		let to = Math.min(from, rest.length);
+		if (previous?.isAdded && previous.pageId) to = rest.findIndex((candidate) => candidate.id === previous.pageId) + 1;
+		else if (next?.isAdded && next.pageId) to = rest.findIndex((candidate) => candidate.id === next.pageId);
+		const currentAnchor = this.getSyntheticPageInsertAfterPdfPage(page);
+		if (anchor === currentAnchor && to === from) return;
+		const previousCurrentPage = this.currentPage;
+		this.pushHistory();
+		page.insertAfterPdfPage = anchor;
+		const mapPage = moveSyntheticPageIndex(document, this.realPdfPageCount, from, to);
+		this.selectedTargets = this.selectedTargets.map((target) => ({ ...target, page: mapPage(target.page) }));
+		this.selectedTarget = this.selectedTargets[0] ?? null;
+		this.pageSurfaces.forEach((_surface, pageNumber) => this.invalidateAnnotationPageCache(pageNumber));
+		this.markDirtyAndRedraw("已调整页面顺序");
+		this.refreshSyntheticPages(mapPage(previousCurrentPage));
 	}
 
 	private restoreNativeThumbnailScroll(scrollParent: HTMLElement, previousScrollTop: number, previousScrollHeight: number): void {
@@ -3614,7 +3742,7 @@ class NativePdfAnnotatorSession {
 	}
 
 	private applySyntheticPageSize(pageEl: HTMLElement, page: NotebookPage, referenceWidth: number): { width: number; height: number } {
-		const dimensions = getNotebookPageSizeDimensions(page.pageSize);
+		const dimensions = getNotebookPageSizeDimensions(page.pageSize, page.customSize);
 		const a4Dimensions = getNotebookPageSizeDimensions("a4");
 		const scale = referenceWidth / a4Dimensions.width;
 		const width = Math.max(24, Math.round(dimensions.width * scale));
@@ -4052,7 +4180,7 @@ class NativePdfAnnotatorSession {
 	private setPdfPageTemplateByPage(pageNumber: number, template: NotebookTemplate): void {
 		const pageTemplate = this.ensurePdfPageTemplate(pageNumber);
 		if (!pageTemplate) {
-			new Notice("Template editing is only available for PDFs created by this plugin.");
+			new Notice("只有本插件创建的 PDF 才能编辑模板。");
 			return;
 		}
 		if (pageTemplate.template === template) {
@@ -4061,7 +4189,7 @@ class NativePdfAnnotatorSession {
 		this.pushHistory();
 		pageTemplate.template = template;
 		this.recordLatestPageStyle(pageTemplate);
-		this.markDirtyAndRedraw(`Template changed to ${getNotebookTemplateLabel(template)}`);
+		this.markDirtyAndRedraw(`模板已改为 ${getNotebookTemplateLabel(template)}`);
 		this.refreshSyntheticPages(pageNumber);
 		this.drawPageAnnotations(pageNumber);
 	}
@@ -4069,7 +4197,7 @@ class NativePdfAnnotatorSession {
 	private setPdfPagePaperColorByPage(pageNumber: number, color: string): void {
 		const pageTemplate = this.ensurePdfPageTemplate(pageNumber);
 		if (!pageTemplate) {
-			new Notice("Paper color editing is only available for PDFs created by this plugin.");
+			new Notice("只有本插件创建的 PDF 才能编辑纸色。");
 			return;
 		}
 		if (pageTemplate.paperColor.toLowerCase() === color.toLowerCase()) {
@@ -4078,7 +4206,7 @@ class NativePdfAnnotatorSession {
 		this.pushHistory();
 		pageTemplate.paperColor = color;
 		this.recordLatestPageStyle(pageTemplate);
-		this.markDirtyAndRedraw("Paper color changed");
+		this.markDirtyAndRedraw("已更改纸色");
 		this.refreshSyntheticPages(pageNumber);
 		this.drawPageAnnotations(pageNumber);
 	}
@@ -4633,7 +4761,7 @@ class NativePdfAnnotatorSession {
 				if (result) {
 					resolve(result);
 				} else {
-					reject(new Error("Canvas snapshot returned no image data"));
+					reject(new Error("画布快照没有返回图像数据"));
 				}
 			}, "image/png");
 		});
@@ -4646,7 +4774,7 @@ class NativePdfAnnotatorSession {
 		} else {
 			await new Promise<void>((resolve, reject) => {
 				image.addEventListener("load", () => resolve(), { once: true });
-				image.addEventListener("error", () => reject(new Error("Canvas snapshot image failed to load")), { once: true });
+				image.addEventListener("error", () => reject(new Error("画布快照图像加载失败")), { once: true });
 			});
 		}
 		return {
@@ -5171,7 +5299,7 @@ class NativePdfAnnotatorSession {
 		const lineSpacing = existingItem ? resolveTextLineSpacing(existingItem) : this.currentTextLineSpacing;
 		const wordWrap = existingItem ? resolveTextWordWrap(existingItem) : this.currentTextWordWrap;
 		editor.wrap = wordWrap ? "soft" : "off";
-		editor.placeholder = "Type text";
+		editor.placeholder = "输入文字";
 		editor.spellcheck = true;
 		editor.autocomplete = "off";
 		editor.autocapitalize = "sentences";
@@ -5295,7 +5423,7 @@ class NativePdfAnnotatorSession {
 				this.updateInlineTextCaretMirror();
 			}
 		}, 0);
-		this.refreshStatus("Type on page. Enter adds a line, Ctrl/Cmd+Enter saves, Esc cancels.");
+		this.refreshStatus("在页面上输入。Enter 换行，Ctrl/Cmd+Enter 保存，Esc 取消。");
 	}
 
 	private finishSessionInlineTextEditor(apply: boolean): void {
@@ -5348,7 +5476,7 @@ class NativePdfAnnotatorSession {
 					this.annotationDocument.textItems = this.annotationDocument.textItems.filter((entry) => entry.id !== targetId);
 					this.selectedTargets = this.selectedTargets.filter((target) => target.id !== targetId);
 					this.selectedTarget = this.selectedTargets[0] ?? null;
-					this.markDirtyAndRedraw("Text annotation deleted");
+					this.markDirtyAndRedraw("已删除文字批注");
 					return;
 				}
 				existing.text = value;
@@ -5370,7 +5498,7 @@ class NativePdfAnnotatorSession {
 				existing.boxHeightScale = boxHeightScale ?? existing.boxHeightScale;
 				this.selectedTarget = { kind: "text", id: existing.id, page: pageNumber };
 				this.selectedTargets = [this.selectedTarget];
-				this.markDirtyAndRedraw("Text annotation updated");
+				this.markDirtyAndRedraw("已更新文字批注");
 				return;
 			}
 		}
@@ -5403,7 +5531,7 @@ class NativePdfAnnotatorSession {
 		this.annotationDocument.textItems.push(nextText);
 		this.selectedTarget = { kind: "text", id: nextText.id, page: pageNumber };
 		this.selectedTargets = [this.selectedTarget];
-		this.markDirtyAndRedraw("Text annotation added");
+		this.markDirtyAndRedraw("已添加文字批注");
 	}
 
 	private getInlineTextFramePoint(pageNumber: number): AnnotationPoint | null {
@@ -5515,7 +5643,7 @@ class NativePdfAnnotatorSession {
 			const handleEl = createEl("button");
 			handleEl.type = "button";
 			handleEl.className = `pdf-native-annotator-inline-text-handle ${handle.cls}`;
-			handleEl.setAttribute("aria-label", `Resize text box ${handle.name}`);
+			handleEl.setAttribute("aria-label", `调整文本框 ${handle.name}`);
 			handleEl.addEventListener("pointerdown", (event) => {
 				event.preventDefault();
 				event.stopPropagation();
@@ -5668,7 +5796,7 @@ class NativePdfAnnotatorSession {
 		if (!this.annotationMode) {
 			this.annotationMode = true;
 			this.applyOverlayMode();
-			this.refreshStatus("Annotation mode enabled");
+			this.refreshStatus("已开启批注模式");
 		}
 		this.persistToolDefaults();
 	}
@@ -5718,7 +5846,7 @@ class NativePdfAnnotatorSession {
 				shape.color = color;
 			}
 		}
-		this.markDirtyAndRedraw(this.selectedTargets.length === 1 ? "Selection color updated" : `Updated ${this.selectedTargets.length} selection colors`);
+		this.markDirtyAndRedraw(this.selectedTargets.length === 1 ? "已更新所选颜色" : `已更新 ${this.selectedTargets.length} 项所选内容的颜色`);
 	}
 
 	private applyTextColorToSelection(color: string, pushHistory = true): void {
@@ -5737,7 +5865,7 @@ class NativePdfAnnotatorSession {
 				item.color = color;
 			}
 		}
-		this.markDirtyAndRedraw("Text color updated");
+		this.markDirtyAndRedraw("已更新文字颜色");
 	}
 
 	private applyWidthToSelection(width: number, pushHistory = true): void {
@@ -5770,7 +5898,7 @@ class NativePdfAnnotatorSession {
 				item.fontScale = this.getStableTextFontScale(item.fontSize);
 			}
 		}
-		this.markDirtyAndRedraw(this.selectedTargets.length === 1 ? "Selection width updated" : `Updated ${this.selectedTargets.length} selection widths`);
+		this.markDirtyAndRedraw(this.selectedTargets.length === 1 ? "已更新所选粗细" : `已更新 ${this.selectedTargets.length} 项所选内容的粗细`);
 	}
 
 	private applyFontFamilyToSelection(fontFamily: string): void {
@@ -5788,7 +5916,7 @@ class NativePdfAnnotatorSession {
 				this.updateAutoFitTextAnnotation(item, target.page);
 			}
 		}
-		this.markDirtyAndRedraw("Text font updated");
+		this.markDirtyAndRedraw("已更新文字字体");
 	}
 
 	private applyTextSizeToSelection(fontSize: number): void {
@@ -5807,7 +5935,7 @@ class NativePdfAnnotatorSession {
 				this.updateAutoFitTextAnnotation(item, target.page);
 			}
 		}
-		this.markDirtyAndRedraw("Text size updated");
+		this.markDirtyAndRedraw("已更新文字大小");
 	}
 
 	private applyTextFormattingToSelection(
@@ -5853,7 +5981,7 @@ class NativePdfAnnotatorSession {
 				this.updateAutoFitTextAnnotation(item, target.page);
 			}
 		}
-		this.markDirtyAndRedraw(autoFit ? "Text box will resize to fit" : "Text box size fixed");
+		this.markDirtyAndRedraw(autoFit ? "文本框将自动适应文字大小" : "文本框大小已固定");
 	}
 
 	private setTextFontFamily(fontFamily: string): void {
@@ -5878,7 +6006,7 @@ class NativePdfAnnotatorSession {
 		this.currentTextFontWeight = fontWeight;
 		this.updateInlineTextEditorStyle();
 		if (this.shouldApplyTextStyleToSelection()) {
-			this.applyTextFormattingToSelection({ fontWeight }, "Text weight updated");
+			this.applyTextFormattingToSelection({ fontWeight }, "已更新文字粗细");
 		}
 		this.refreshToolbar();
 	}
@@ -5887,7 +6015,7 @@ class NativePdfAnnotatorSession {
 		this.currentTextFontStyle = fontStyle;
 		this.updateInlineTextEditorStyle();
 		if (this.shouldApplyTextStyleToSelection()) {
-			this.applyTextFormattingToSelection({ fontStyle }, "Text style updated");
+			this.applyTextFormattingToSelection({ fontStyle }, "已更新文字样式");
 		}
 		this.refreshToolbar();
 	}
@@ -5896,7 +6024,7 @@ class NativePdfAnnotatorSession {
 		this.currentTextAlignment = textAlign;
 		this.updateInlineTextEditorStyle();
 		if (this.shouldApplyTextStyleToSelection()) {
-			this.applyTextFormattingToSelection({ textAlign }, "Text alignment updated");
+			this.applyTextFormattingToSelection({ textAlign }, "已更新文字对齐");
 		}
 		this.refreshToolbar();
 	}
@@ -5905,7 +6033,7 @@ class NativePdfAnnotatorSession {
 		this.currentTextVerticalAlignment = verticalAlign;
 		this.updateInlineTextEditorStyle();
 		if (this.shouldApplyTextStyleToSelection()) {
-			this.applyTextFormattingToSelection({ verticalAlign }, "Text vertical alignment updated");
+			this.applyTextFormattingToSelection({ verticalAlign }, "已更新文字垂直对齐");
 		}
 		this.refreshToolbar();
 	}
@@ -5920,7 +6048,7 @@ class NativePdfAnnotatorSession {
 		if (this.shouldApplyTextStyleToSelection()) {
 			this.applyTextFormattingToSelection(
 				{ lineSpacing: this.currentTextLineSpacing },
-				"Text line spacing updated"
+				"已更新文字行距"
 			);
 		}
 		this.refreshToolbar();
@@ -5933,7 +6061,7 @@ class NativePdfAnnotatorSession {
 		}
 		this.updateInlineTextEditorStyle();
 		if (this.shouldApplyTextStyleToSelection()) {
-			this.applyTextFormattingToSelection({ wordWrap }, wordWrap ? "Text wrapping enabled" : "Text wrapping disabled");
+			this.applyTextFormattingToSelection({ wordWrap }, wordWrap ? "已开启文字自动换行" : "已关闭文字自动换行");
 		}
 		this.refreshToolbar();
 	}
@@ -5990,7 +6118,7 @@ class NativePdfAnnotatorSession {
 			return;
 		}
 		if (!this.annotationDocument || !this.hasSelectedText()) {
-			this.refreshStatus("Select or edit text before changing case");
+			this.refreshStatus("请先选中或编辑文字，再切换大小写");
 			return;
 		}
 		this.pushHistory();
@@ -6004,7 +6132,7 @@ class NativePdfAnnotatorSession {
 				this.updateAutoFitTextAnnotation(item, target.page);
 			}
 		}
-		this.markDirtyAndRedraw("Text case updated");
+		this.markDirtyAndRedraw("已更新文字大小写");
 	}
 
 	private setTextColor(color: string, pushHistory = true, refreshToolbar = true): void {
@@ -6081,7 +6209,7 @@ class NativePdfAnnotatorSession {
 		}
 		if (!this.annotationMode) {
 			this.annotationMode = true;
-			this.refreshStatus("Annotation mode enabled");
+			this.refreshStatus("已开启批注模式");
 		}
 		if (this.shouldApplyStyleToSelection()) {
 			this.applyColorToSelection(this.currentColor);
@@ -6090,7 +6218,7 @@ class NativePdfAnnotatorSession {
 		this.persistToolDefaults();
 		this.applyOverlayMode();
 		this.refreshToolbar();
-		this.refreshStatus(`Preset: ${this.toolState.allPresets.find((preset) => preset.id === presetId)?.label ?? "Custom"}`);
+		this.refreshStatus(`预设：${this.toolState.allPresets.find((preset) => preset.id === presetId)?.label ?? "自定义"}`);
 	}
 
 	private setSelectionMode(mode: SelectionMode): void {
@@ -6230,8 +6358,8 @@ class NativePdfAnnotatorSession {
 			const group = addedEntriesByAnchor.get(insertAfter) ?? [];
 			group.push({
 				pageNumber,
-				label: page.title.trim() || `Added page ${index + 1}`,
-				detail: `${getNotebookTemplateLabel(page.template)} - ${getNotebookPageSizeLabel(page.pageSize)} - ${page.title.trim() || `Added page ${index + 1}`}`,
+				label: page.title.trim() || `添加页 ${index + 1}`,
+				detail: `${getNotebookTemplateLabel(page.template)} - ${getNotebookPageSizeLabel(page.pageSize)} - ${page.title.trim() || `添加页 ${index + 1}`}`,
 				isAdded: true,
 				annotationCount,
 				pageId: page.id,
@@ -6253,10 +6381,10 @@ class NativePdfAnnotatorSession {
 				: null;
 			entries.push({
 				pageNumber,
-				label: `Page ${pageNumber}`,
+				label: `第 ${pageNumber} 页`,
 				detail: pageTemplate
-					? `${getNotebookTemplateLabel(pageTemplate.template)} - ${getNotebookPageSizeLabel(pageTemplate.pageSize)} - Plugin-created PDF page ${pageNumber}`
-					: `PDF page - Page ${pageNumber}`,
+					? `${getNotebookTemplateLabel(pageTemplate.template)} - ${getNotebookPageSizeLabel(pageTemplate.pageSize)} - 插件创建的 PDF 第 ${pageNumber} 页`
+					: `PDF 页 - 第 ${pageNumber} 页`,
 				isAdded: false,
 				annotationCount,
 				template: pageTemplate?.template,
@@ -6278,8 +6406,8 @@ class NativePdfAnnotatorSession {
 			.filter((pageNumber) => !permanentPdfPages.has(pageNumber))
 			.map((pageNumber): MixedPageEntry => ({
 				pageNumber,
-				label: `Page ${pageNumber}`,
-				detail: `Removed PDF page - annotations preserved`,
+				label: `第 ${pageNumber} 页`,
+				detail: `已移除的 PDF 页（批注已保留）`,
 				isAdded: false,
 				annotationCount: this.getAnnotationCountForPage(pageNumber, document),
 				isRemoved: true,
@@ -6287,8 +6415,8 @@ class NativePdfAnnotatorSession {
 			}));
 		const removedAddedEntries = (document.removedPages ?? []).map((entry): MixedPageEntry => ({
 			pageNumber: 0,
-			label: entry.page.title.trim() || "Removed added page",
-			detail: `${getNotebookTemplateLabel(entry.page.template)} - ${getNotebookPageSizeLabel(entry.page.pageSize)} - removed`,
+			label: entry.page.title.trim() || "已移除添加页",
+			detail: `${getNotebookTemplateLabel(entry.page.template)} - ${getNotebookPageSizeLabel(entry.page.pageSize)} - 已移除`,
 			isAdded: true,
 			annotationCount:
 				entry.annotations.strokes.length +
@@ -6339,7 +6467,7 @@ class NativePdfAnnotatorSession {
 			this.scheduleSyncPages();
 		}
 		this.refreshToolbar();
-		this.refreshStatus(this.getCurrentSyntheticPage() ? `Added page ${nextPage}` : `PDF page ${nextPage}`);
+		this.refreshStatus(this.getCurrentSyntheticPage() ? `添加页 ${nextPage}` : `PDF 第 ${nextPage} 页`);
 	}
 
 	private scrollPageElementIntoView(pageEl: HTMLElement): void {
@@ -6410,7 +6538,7 @@ class NativePdfAnnotatorSession {
 		this.syncCurrentPageForPageAction();
 		const anchor = this.getPageMenuAnchor();
 		if (!anchor) {
-			new Notice("The PDF toolbar is not ready yet.");
+			new Notice("PDF 工具栏还没准备好。");
 			return;
 		}
 		this.openPageListPopover(anchor);
@@ -6420,7 +6548,7 @@ class NativePdfAnnotatorSession {
 		this.syncCurrentPageForPageAction();
 		const anchor = this.getPageMenuAnchor();
 		if (!anchor) {
-			new Notice("The PDF toolbar is not ready yet.");
+			new Notice("PDF 工具栏还没准备好。");
 			return;
 		}
 		this.openGoToPagePopover(anchor);
@@ -6429,7 +6557,7 @@ class NativePdfAnnotatorSession {
 	private renumberTemplatePageTitles(): void {
 		this.getAppendedPages().forEach((page, index) => {
 			if (/^Page \d+( copy)?$/.test(page.title)) {
-				page.title = `Page ${this.realPdfPageCount + index + 1}`;
+				page.title = `第 ${this.realPdfPageCount + index + 1} 页`;
 			}
 		});
 	}
@@ -6463,16 +6591,17 @@ class NativePdfAnnotatorSession {
 			? this.realPdfPageCount
 			: clamp(Math.round(insertAfterPdfPage ?? this.realPdfPageCount), 0, Math.max(0, this.realPdfPageCount));
 		const pageOptions = options ?? {
-			title: `Page ${this.realPdfPageCount + pages.length + 1}`,
+			title: `第 ${this.realPdfPageCount + pages.length + 1} 页`,
 			template: this.getCurrentSyntheticPage()?.template ?? "ruled",
 			pageSize: this.getCurrentSyntheticPage()?.pageSize ?? "a4",
 			paperColor: this.getCurrentSyntheticPage()?.paperColor ?? "#fffdf7"
 		};
 		const nextPage = createTemplateNotebookPage(
-			pageOptions.title.trim() || `Page ${this.realPdfPageCount + pages.length + 1}`,
+			pageOptions.title.trim() || `第 ${this.realPdfPageCount + pages.length + 1} 页`,
 			pageOptions.template,
 			pageOptions.pageSize,
-			pageOptions.paperColor
+			pageOptions.paperColor,
+			pageOptions.customSize
 		);
 		nextPage.insertAfterPdfPage = anchor;
 		this.pushHistory();
@@ -6485,7 +6614,7 @@ class NativePdfAnnotatorSession {
 		this.selectedTargets = this.selectedTargets.map((target) => target.page >= insertedPageNumber ? { ...target, page: target.page + 1 } : target);
 		this.currentPage = insertedPageNumber;
 		this.annotationMode = true;
-		this.markDirtyAndRedraw("Added template page to PDF");
+		this.markDirtyAndRedraw("已向 PDF 添加模板页");
 		this.refreshSyntheticPages(insertedPageNumber);
 	}
 
@@ -6501,16 +6630,16 @@ class NativePdfAnnotatorSession {
 	private openTemplatePageInsertModalAfterPageId(pageId: string): void {
 		const target = this.getSyntheticPageById(pageId);
 		if (!target) {
-			new Notice("That added page is no longer available.");
+			new Notice("那张添加页已经不在了。");
 			return;
 		}
 		this.closePageListPopover();
 		this.openTemplatePageInsertModalAtLocation("after", {
 			insertIndex: target.index + 1,
 			anchor: this.getSyntheticPageInsertAfterPdfPage(target.page),
-			anchorLabel: target.page.title.trim() || `added page ${target.pageNumber}`
+			anchorLabel: target.page.title.trim() || `添加页 ${target.pageNumber}`
 		}, {
-			title: `Inserted page after ${target.page.title.trim() || `added page ${target.pageNumber}`}`,
+			title: `已在 ${target.page.title.trim() || `添加页 ${target.pageNumber}`} 之后插入页面`,
 			template: target.page.template,
 			pageSize: target.page.pageSize,
 			paperColor: target.page.paperColor
@@ -6522,7 +6651,7 @@ class NativePdfAnnotatorSession {
 		this.openTemplatePageInsertModalAtLocation("after", {
 			insertIndex: this.findFirstSyntheticInsertIndexAfterPdfPage(anchor),
 			anchor,
-			anchorLabel: `PDF page ${anchor}`
+			anchorLabel: `PDF 第 ${anchor} 页`
 		});
 	}
 
@@ -6548,15 +6677,15 @@ class NativePdfAnnotatorSession {
 		const pageIndex = this.getSyntheticPageIndex();
 		const pages = this.getAppendedPages();
 		if (pageIndex < 0 || pageIndex >= pages.length) {
-			new Notice("Only added template pages can be deleted here.");
+			new Notice("这里只能删除添加的模板页。");
 			return;
 		}
 		const pageNumber = this.realPdfPageCount + pageIndex + 1;
 		const title = pages[pageIndex].title;
 		this.requestDangerConfirmation(
-			"Remove added page?",
-			`${title} and its annotations will move to Removed pages, where they can be restored or deleted permanently.`,
-			"Move to Removed",
+			"移除这张添加页？",
+			`${title} 及其批注会移到「已移除的页面」，之后可以恢复或永久删除。`,
+			"移到已移除",
 			() => {
 				if (!this.annotationDocument) {
 					return;
@@ -6573,7 +6702,7 @@ class NativePdfAnnotatorSession {
 				this.selectedTargets = [];
 				this.selectedTarget = null;
 				this.currentPage = Math.max(1, Math.min(pageNumber, this.realPdfPageCount + pages.length));
-				this.markDirtyAndRedraw("Moved added page to Removed");
+				this.markDirtyAndRedraw("已将添加页移到已移除");
 				this.refreshSyntheticPages(this.currentPage);
 			}
 		);
@@ -6581,12 +6710,12 @@ class NativePdfAnnotatorSession {
 
 	private deleteCurrentPdfPageFromSession(): void {
 		if (!this.annotationDocument || this.currentPage < 1 || this.currentPage > this.realPdfPageCount) {
-			new Notice("Open a PDF page first.");
+			new Notice("请先打开一个 PDF 页面。");
 			return;
 		}
 		const pageNumber = this.currentPage;
 		if (this.isPdfPageDeleted(pageNumber)) {
-			new Notice(`PDF page ${pageNumber} is already hidden from this session.`);
+			new Notice(`PDF 第 ${pageNumber} 页在本次会话中已经隐藏。`);
 			return;
 		}
 		this.finishSessionInlineTextEditor(false);
@@ -6599,7 +6728,7 @@ class NativePdfAnnotatorSession {
 		const entries = this.getMixedPageEntries();
 		const nextEntry = entries.find((entry) => entry.pageNumber > pageNumber) ?? entries[entries.length - 1];
 		this.currentPage = nextEntry?.pageNumber ?? 1;
-		this.markDirtyAndRedraw(`Moved PDF page ${pageNumber} to Removed`);
+		this.markDirtyAndRedraw(`已将 PDF 第 ${pageNumber} 页移到已移除`);
 		this.syncPages();
 		this.goToMixedPage(this.currentPage);
 	}
@@ -6607,7 +6736,7 @@ class NativePdfAnnotatorSession {
 	private deleteAddedPageById(pageId: string): void {
 		const target = this.getSyntheticPageById(pageId);
 		if (!target) {
-			new Notice("That added page is no longer available.");
+			new Notice("那张添加页已经不在了。");
 			return;
 		}
 		this.closePageListPopover();
@@ -6627,27 +6756,27 @@ class NativePdfAnnotatorSession {
 			pageId
 		);
 		if (restoredPageNumber === null) {
-			new Notice("That removed page is no longer available.");
+			new Notice("那张已移除的页面已经不在了。");
 			return;
 		}
 		this.selectedTargets = [];
 		this.selectedTarget = null;
 		this.currentPage = restoredPageNumber;
-		this.markDirtyAndRedraw("Restored added page");
+		this.markDirtyAndRedraw("已恢复添加页");
 		this.refreshSyntheticPages(restoredPageNumber);
 	}
 
 	private permanentlyDeleteRemovedAddedPageById(pageId: string): void {
 		const removedPage = this.getRemovedPages().find((entry) => entry.page.id === pageId);
 		if (!removedPage) {
-			new Notice("That removed page is no longer available.");
+			new Notice("那张已移除的页面已经不在了。");
 			return;
 		}
 		this.closePageListPopover();
 		this.requestDangerConfirmation(
-			"Delete removed page permanently?",
-			`${removedPage.page.title} and its stored annotations will be permanently deleted. This cannot be restored after the session is saved and reopened.`,
-			"Delete permanently",
+			"永久删除这张已移除的页面？",
+			`${removedPage.page.title} 及其已保存的批注将被永久删除。会话保存并重新打开后无法恢复。`,
+			"永久删除",
 			() => {
 				if (!this.annotationDocument) {
 					return;
@@ -6656,7 +6785,7 @@ class NativePdfAnnotatorSession {
 				if (!permanentlyDeleteRemovedPage(this.annotationDocument, pageId)) {
 					return;
 				}
-				this.markDirtyAndRedraw("Permanently deleted removed page");
+				this.markDirtyAndRedraw("已永久删除该页面");
 				this.refreshToolbar();
 			}
 		);
@@ -6664,18 +6793,18 @@ class NativePdfAnnotatorSession {
 
 	private permanentlyDeleteRemovedPdfPageByNumber(pageNumber: number): void {
 		if (!this.annotationDocument || pageNumber < 1 || pageNumber > this.realPdfPageCount) {
-			new Notice("That removed PDF page is no longer available.");
+			new Notice("那张已移除的 PDF 页已经不在了。");
 			return;
 		}
 		if (!this.annotationDocument.deletedPdfPages?.includes(pageNumber)) {
-			new Notice("That PDF page is not in Removed.");
+			new Notice("该 PDF 页不在已移除列表里。");
 			return;
 		}
 		this.closePageListPopover();
 		this.requestDangerConfirmation(
-			"Delete removed PDF page permanently?",
-			`PDF page ${pageNumber} will be permanently omitted from this working session and future mixed exports. The original source PDF bytes are not rewritten.`,
-			"Delete permanently",
+			"永久删除这张已移除的 PDF 页？",
+			`PDF 第 ${pageNumber} 页将从本次工作会话和今后的混合导出中永久省略。原始 PDF 文件本身不会被改写。`,
+			"永久删除",
 			() => {
 				if (!this.annotationDocument) {
 					return;
@@ -6686,7 +6815,7 @@ class NativePdfAnnotatorSession {
 				}
 				this.selectedTargets = [];
 				this.selectedTarget = null;
-				this.markDirtyAndRedraw(`Permanently deleted PDF page ${pageNumber}`);
+				this.markDirtyAndRedraw(`已永久删除 PDF 第 ${pageNumber} 页`);
 				this.syncPages();
 				this.refreshToolbar();
 			}
@@ -6703,7 +6832,7 @@ class NativePdfAnnotatorSession {
 			return;
 		}
 		this.currentPage = pageNumber;
-		this.markDirtyAndRedraw(`Restored PDF page ${pageNumber}`);
+		this.markDirtyAndRedraw(`已恢复 PDF 第 ${pageNumber} 页`);
 		this.syncPages();
 		this.goToMixedPage(pageNumber);
 	}
@@ -6716,7 +6845,7 @@ class NativePdfAnnotatorSession {
 		const pageIndex = this.getSyntheticPageIndex();
 		const pages = this.getAppendedPages();
 		if (pageIndex < 0 || pageIndex >= pages.length) {
-			new Notice("Only added template pages can be duplicated here.");
+			new Notice("这里只能复制添加的模板页。");
 			return;
 		}
 		const sourcePage = pages[pageIndex];
@@ -6732,7 +6861,7 @@ class NativePdfAnnotatorSession {
 		const nextPage: NotebookPage = {
 			...sourcePage,
 			id: generateId("page"),
-			title: `${sourcePage.title} copy`,
+			title: `${sourcePage.title} 副本`,
 			strokes: [],
 			textItems: [],
 			shapes: [],
@@ -6769,14 +6898,14 @@ class NativePdfAnnotatorSession {
 		this.selectedTargets = [];
 		this.selectedTarget = null;
 		this.currentPage = insertedPageNumber;
-		this.markDirtyAndRedraw(includeAnnotations ? "Duplicated added page" : "Duplicated page structure");
+		this.markDirtyAndRedraw(includeAnnotations ? "已复制添加页" : "已复制页面结构");
 		this.refreshSyntheticPages(insertedPageNumber);
 	}
 
 	private duplicateAddedPageById(pageId: string, includeAnnotations = true): void {
 		const target = this.getSyntheticPageById(pageId);
 		if (!target) {
-			new Notice("That added page is no longer available.");
+			new Notice("那张添加页已经不在了。");
 			return;
 		}
 		this.closePageListPopover();
@@ -6792,7 +6921,7 @@ class NativePdfAnnotatorSession {
 		const pageIndex = this.getSyntheticPageIndex();
 		const pages = this.getAppendedPages();
 		if (pageIndex < 0 || pageIndex >= pages.length) {
-			new Notice("Only added template pages can be cleared here.");
+			new Notice("这里只能清空添加的模板页。");
 			return;
 		}
 		const page = pages[pageIndex];
@@ -6807,9 +6936,9 @@ class NativePdfAnnotatorSession {
 			return;
 		}
 		this.requestDangerConfirmation(
-			"Clear added page?",
-			`All annotations on ${page.title} will be removed, but the page itself will stay.`,
-			"Clear page",
+			"清空这张添加页？",
+			`${page.title} 上的所有批注都会被删除，但页面本身会保留。`,
+			"清空页面",
 			() => {
 				if (!this.annotationDocument) {
 					return;
@@ -6823,7 +6952,7 @@ class NativePdfAnnotatorSession {
 				if (this.annotationDocument.ocrGroups) this.annotationDocument.ocrGroups = this.annotationDocument.ocrGroups.filter(group => group.page !== pageNumber);
 				this.selectedTargets = [];
 				this.selectedTarget = null;
-				this.markDirtyAndRedraw("Cleared added page");
+				this.markDirtyAndRedraw("已清空添加页");
 				this.refreshSyntheticPages(pageNumber);
 			}
 		);
@@ -6832,7 +6961,7 @@ class NativePdfAnnotatorSession {
 	private clearAddedPageById(pageId: string): void {
 		const target = this.getSyntheticPageById(pageId);
 		if (!target) {
-			new Notice("That added page is no longer available.");
+			new Notice("那张添加页已经不在了。");
 			return;
 		}
 		this.closePageListPopover();
@@ -6848,7 +6977,7 @@ class NativePdfAnnotatorSession {
 		this.pushHistory();
 		page.template = template;
 		this.recordLatestPageStyle(page);
-		this.markDirtyAndRedraw(`Template changed to ${template}`);
+		this.markDirtyAndRedraw(`模板已改为 ${template}`);
 		this.refreshSyntheticPages(this.currentPage);
 	}
 
@@ -6859,14 +6988,15 @@ class NativePdfAnnotatorSession {
 		}
 		this.pushHistory();
 		page.pageSize = pageSize;
+		delete page.customSize;
 		this.recordLatestPageStyle(page);
-		this.markDirtyAndRedraw(`Page size changed to ${pageSize}`);
+		this.markDirtyAndRedraw(`页面大小已改为 ${pageSize}`);
 		this.refreshSyntheticPages(this.currentPage);
 	}
 	private setAddedPageTemplateById(pageId: string, template: NotebookTemplate): void {
 		const target = this.getSyntheticPageById(pageId);
 		if (!target) {
-			new Notice("That added page is no longer available.");
+			new Notice("那张添加页已经不在了。");
 			return;
 		}
 		if (target.page.template === template) {
@@ -6875,14 +7005,14 @@ class NativePdfAnnotatorSession {
 		this.pushHistory();
 		target.page.template = template;
 		this.recordLatestPageStyle(target.page);
-		this.markDirtyAndRedraw(`Template changed to ${getNotebookTemplateLabel(template)}`);
+		this.markDirtyAndRedraw(`模板已改为 ${getNotebookTemplateLabel(template)}`);
 		this.refreshSyntheticPages(target.pageNumber);
 	}
 
 	private setAddedPageSizeById(pageId: string, pageSize: NotebookPageSize): void {
 		const target = this.getSyntheticPageById(pageId);
 		if (!target) {
-			new Notice("That added page is no longer available.");
+			new Notice("那张添加页已经不在了。");
 			return;
 		}
 		if (target.page.pageSize === pageSize) {
@@ -6890,15 +7020,16 @@ class NativePdfAnnotatorSession {
 		}
 		this.pushHistory();
 		target.page.pageSize = pageSize;
+		delete target.page.customSize;
 		this.recordLatestPageStyle(target.page);
-		this.markDirtyAndRedraw(`Page size changed to ${getNotebookPageSizeLabel(pageSize)}`);
+		this.markDirtyAndRedraw(`页面大小已改为 ${getNotebookPageSizeLabel(pageSize)}`);
 		this.refreshSyntheticPages(target.pageNumber);
 	}
 
 	private setAddedPagePaperColorById(pageId: string, color: string): void {
 		const target = this.getSyntheticPageById(pageId);
 		if (!target) {
-			new Notice("That added page is no longer available.");
+			new Notice("那张添加页已经不在了。");
 			return;
 		}
 		if (target.page.paperColor.toLowerCase() === color.toLowerCase()) {
@@ -6907,7 +7038,7 @@ class NativePdfAnnotatorSession {
 		this.pushHistory();
 		target.page.paperColor = color;
 		this.recordLatestPageStyle(target.page);
-		this.markDirtyAndRedraw("Paper color changed");
+		this.markDirtyAndRedraw("已更改纸色");
 		this.refreshSyntheticPages(target.pageNumber);
 	}
 	private openGoToPagePopover(anchor: HTMLElement): void {
@@ -6919,7 +7050,7 @@ class NativePdfAnnotatorSession {
 		this.beginExclusiveMenu();
 		const popover = createDiv();
 		popover.className = "modal pdf-native-annotator-rename-popover pdf-native-annotator-goto-popover";
-		const title = popover.createDiv({ cls: "pdf-native-annotator-color-popover-title", text: "Go to page" });
+		const title = popover.createDiv({ cls: "pdf-native-annotator-color-popover-title", text: "跳转到页" });
 		title.appendChild(this.createPopoverCloseButton(() => this.closeGoToPagePopover()));
 		const form = popover.createEl("form", { cls: "pdf-native-annotator-rename-form" });
 		const input = form.createEl("input", {
@@ -6931,14 +7062,14 @@ class NativePdfAnnotatorSession {
 		input.max = String(totalPages);
 		input.step = "1";
 		input.value = String(this.getCurrentMixedPageOrdinal());
-		form.createDiv({ cls: "pdf-native-annotator-popover-hint", text: `${totalPages} pages including added template pages` });
+		form.createDiv({ cls: "pdf-native-annotator-popover-hint", text: `共 ${totalPages} 页（含添加的模板页）` });
 		const actions = form.createDiv({ cls: "pdf-native-annotator-confirm-actions" });
-		const cancelButton = actions.createEl("button", { type: "button", text: "Cancel" });
-		const goButton = actions.createEl("button", { type: "submit", text: "Go", cls: "mod-cta" });
+		const cancelButton = actions.createEl("button", { type: "button", text: "取消" });
+		const goButton = actions.createEl("button", { type: "submit", text: "跳转", cls: "mod-cta" });
 		const commit = (): void => {
 			const requestedPage = Number(input.value);
 			if (!Number.isFinite(requestedPage) || requestedPage < 1 || requestedPage > totalPages) {
-				new Notice(`Enter a page from 1 to ${totalPages}.`);
+				new Notice(`请输入 1 到 ${totalPages} 之间的页码。`);
 				return;
 			}
 			this.closeGoToPagePopover();
@@ -6989,20 +7120,20 @@ class NativePdfAnnotatorSession {
 		const menu = new Menu();
 		if (entry.isRemoved) {
 			menu.addItem((item) => item
-				.setTitle("Restore page")
+				.setTitle("恢复页面")
 				.setIcon("rotate-ccw")
 				.onClick(openOrRestore));
 			if (entry.removedKind === "pdf") {
 				menu.addSeparator();
 				menu.addItem((item) => item
-					.setTitle("Delete permanently")
+					.setTitle("永久删除")
 					.setIcon("trash")
 					.setWarning(true)
 					.onClick(() => this.permanentlyDeleteRemovedPdfPageByNumber(entry.pageNumber)));
 			} else if (entry.removedKind === "added" && entry.pageId) {
 				menu.addSeparator();
 				menu.addItem((item) => item
-					.setTitle("Delete permanently")
+					.setTitle("永久删除")
 					.setIcon("trash")
 					.onClick(() => this.permanentlyDeleteRemovedAddedPageById(entry.pageId!)));
 			}
@@ -7010,72 +7141,72 @@ class NativePdfAnnotatorSession {
 			return;
 		}
 		menu.addItem((item) => item
-			.setTitle("Open page")
+			.setTitle("打开页面")
 			.setIcon("arrow-right")
 			.onClick(openOrRestore));
 		menu.addItem((item) => item
-			.setTitle("Copy page link")
+			.setTitle("复制页链接")
 			.setIcon("link")
 			.onClick(() => void this.copyPageLink(entry.pageNumber)));
 		menu.addItem((item) => item
-			.setTitle("Export page snapshot")
+			.setTitle("导出页面快照")
 			.setIcon("image-file")
 			.onClick(() => void this.exportPageSnapshot(entry.pageNumber)));
 		menu.addSeparator();
 		if (entry.pageId) {
 			menu.addItem((item) => item
-				.setTitle("Add template page after")
+				.setTitle("在其后添加模板页")
 				.setIcon("plus")
 				.onClick(() => this.openTemplatePageInsertModalAfterPageId(entry.pageId!)));
 			menu.addItem((item) => item
-				.setTitle("Rename added page...")
+				.setTitle("重命名添加页…")
 				.setIcon("pencil")
 				.onClick(() => this.openRenameAddedPagePopover(anchor, entry.pageId!)));
 			menu.addItem((item) => item
-				.setTitle("Duplicate added page")
+				.setTitle("复制添加页")
 				.setIcon("copy")
 				.onClick(() => this.duplicateAddedPageById(entry.pageId!)));
 			menu.addSeparator();
 			menu.addItem((item) => item
-				.setTitle("Page template...")
+				.setTitle("页面模板…")
 				.setIcon("rows-3")
 				.onClick((menuEvent) => this.openAddedPageTemplateMenu(entry.pageId!, menuEvent, anchor)));
 			menu.addItem((item) => item
-				.setTitle("Page size...")
+				.setTitle("页面大小…")
 				.setIcon("maximize-2")
 				.onClick((menuEvent) => this.openAddedPageSizeMenu(entry.pageId!, menuEvent, anchor)));
 			menu.addItem((item) => item
-				.setTitle("Paper color...")
+				.setTitle("纸色…")
 				.setIcon("palette")
 				.onClick((menuEvent) => this.openAddedPagePaperColorMenu(entry.pageId!, menuEvent, anchor)));
 			menu.addSeparator();
 			menu.addItem((item) => item
-				.setTitle("Clear added page")
+				.setTitle("清空添加页")
 				.setIcon("eraser")
 				.onClick(() => this.clearAddedPageById(entry.pageId!)));
 			menu.addItem((item) => item
-				.setTitle("Move added page to Removed")
+				.setTitle("将添加页移到已移除")
 				.setIcon("trash")
 				.onClick(() => this.deleteAddedPageById(entry.pageId!)));
 		} else {
 			menu.addItem((item) => item
-				.setTitle("Add template page after this PDF page")
+				.setTitle("在此 PDF 页之后添加模板页")
 				.setIcon("plus")
 				.onClick(() => this.openTemplatePageInsertModalAfterPdfPage(entry.pageNumber)));
 			if (this.canEditPdfPageTemplate(entry.pageNumber)) {
 				menu.addSeparator();
 				menu.addItem((item) => item
-					.setTitle("Page template...")
+					.setTitle("页面模板…")
 					.setIcon("rows-3")
 					.onClick((menuEvent) => this.openPdfPageTemplateMenu(entry.pageNumber, menuEvent, anchor)));
 				menu.addItem((item) => item
-					.setTitle("Paper color...")
+					.setTitle("纸色…")
 					.setIcon("palette")
 					.onClick((menuEvent) => this.openPdfPagePaperColorMenu(entry.pageNumber, menuEvent, anchor)));
 				menu.addSeparator();
 			}
 			menu.addItem((item) => item
-				.setTitle("Remove PDF page from session")
+				.setTitle("从本次会话中移除此 PDF 页")
 				.setIcon("trash")
 				.onClick(() => {
 					this.closePageListPopover();
@@ -7089,7 +7220,7 @@ class NativePdfAnnotatorSession {
 	private openAddedPageTemplateMenu(pageId: string, event: MouseEvent | KeyboardEvent, anchor: HTMLElement): void {
 		const target = this.getSyntheticPageById(pageId);
 		if (!target) {
-			new Notice("That added page is no longer available.");
+			new Notice("那张添加页已经不在了。");
 			return;
 		}
 		const menu = new Menu();
@@ -7104,7 +7235,7 @@ class NativePdfAnnotatorSession {
 	private openAddedPageSizeMenu(pageId: string, event: MouseEvent | KeyboardEvent, anchor: HTMLElement): void {
 		const target = this.getSyntheticPageById(pageId);
 		if (!target) {
-			new Notice("That added page is no longer available.");
+			new Notice("那张添加页已经不在了。");
 			return;
 		}
 		const menu = new Menu();
@@ -7119,7 +7250,7 @@ class NativePdfAnnotatorSession {
 	private openAddedPagePaperColorMenu(pageId: string, event: MouseEvent | KeyboardEvent, anchor: HTMLElement): void {
 		const target = this.getSyntheticPageById(pageId);
 		if (!target) {
-			new Notice("That added page is no longer available.");
+			new Notice("那张添加页已经不在了。");
 			return;
 		}
 		const menu = new Menu();
@@ -7130,7 +7261,7 @@ class NativePdfAnnotatorSession {
 			run: () => this.setAddedPagePaperColorById(pageId, preset.color)
 		})));
 		menu.addSeparator();
-		menu.addItem(item => item.setTitle("Custom colour...").setIcon("palette")
+		menu.addItem(item => item.setTitle("自定义颜色…").setIcon("palette")
 			.onClick(() => this.openPaperColorPopover(anchor, target.page.paperColor, color => this.setAddedPagePaperColorById(pageId, color))));
 		this.showMenuAtMenuEvent(menu, event, anchor);
 	}
@@ -7168,7 +7299,7 @@ class NativePdfAnnotatorSession {
 			run: () => this.setPdfPagePaperColorByPage(pageNumber, preset.color)
 		})));
 		menu.addSeparator();
-		menu.addItem(item => item.setTitle("Custom colour...").setIcon("palette")
+		menu.addItem(item => item.setTitle("自定义颜色…").setIcon("palette")
 			.onClick(() => this.openPaperColorPopover(anchor, pageTemplate.paperColor, color => this.setPdfPagePaperColorByPage(pageNumber, color))));
 		this.showMenuAtMenuEvent(menu, event, anchor);
 	}
@@ -7222,7 +7353,7 @@ class NativePdfAnnotatorSession {
 		const pageListDocument = anchor.ownerDocument;
 		const popover = createDiv();
 		popover.className = "modal pdf-native-annotator-page-list-popover";
-		const title = popover.createDiv({ cls: "pdf-native-annotator-color-popover-title", text: "Manage pages" });
+		const title = popover.createDiv({ cls: "pdf-native-annotator-color-popover-title", text: "管理页面" });
 		title.appendChild(this.createPopoverCloseButton(() => this.closePageListPopover()));
 		const countByFilter = {
 			all: entries.length,
@@ -7232,13 +7363,13 @@ class NativePdfAnnotatorSession {
 		};
 		const overview = popover.createDiv({ cls: "pdf-native-annotator-page-list-overview" });
 		overview.createSpan({
-			text: `${countByFilter.all} pages - ${countByFilter.added} added - ${countByFilter.annotated} annotated`
+			text: `${countByFilter.all} 页 · 已添加 ${countByFilter.added} 页 · 有批注 ${countByFilter.annotated} 页`
 		});
 		const filters = popover.createDiv({ cls: "pdf-native-annotator-page-list-filters" });
 		const searchWrap = popover.createDiv({ cls: "pdf-native-annotator-page-list-search" });
 		const searchInput = searchWrap.createEl("input", {
 			type: "search",
-			placeholder: "Search pages"
+			placeholder: "搜索页面"
 		});
 		searchInput.value = this.pageListQuery;
 		const summary = popover.createDiv({ cls: "pdf-native-annotator-page-list-summary" });
@@ -7264,9 +7395,9 @@ class NativePdfAnnotatorSession {
 			currentFilteredEntries = filteredEntries;
 			summary.textContent = filteredEntries.length === sourceEntries.length
 				? `${sourceEntries.length} ${this.pageListFilter === "removed" ? "removed" : "pages"}`
-				: `${filteredEntries.length} of ${sourceEntries.length} pages`;
+				: `${filteredEntries.length} / ${sourceEntries.length} 页`;
 			if (filteredEntries.length === 0) {
-				list.createDiv({ cls: "pdf-native-annotator-page-list-empty", text: "No pages match this filter." });
+				list.createDiv({ cls: "pdf-native-annotator-page-list-empty", text: "没有符合筛选条件的页面。" });
 				return;
 			}
 			for (const entry of filteredEntries) {
@@ -7305,7 +7436,7 @@ class NativePdfAnnotatorSession {
 				}
 				const number = button.createSpan({
 					cls: "pdf-native-annotator-page-list-number",
-					text: entry.isRemoved ? "Removed" : String(entry.pageNumber)
+					text: entry.isRemoved ? "已移除" : String(entry.pageNumber)
 				});
 				number.setAttribute("aria-hidden", "true");
 				const text = button.createSpan({ cls: "menu-item-title pdf-native-annotator-page-list-text" });
@@ -7341,7 +7472,7 @@ class NativePdfAnnotatorSession {
 				const actions = button.createSpan({ cls: "menu-item-flair pdf-native-annotator-page-list-actions" });
 				actions.addEventListener("click", (event) => event.stopPropagation());
 				actions.addEventListener("keydown", (event) => event.stopPropagation());
-				const moreButton = this.createPageListActionButton("more-horizontal", `Actions for ${entry.label}`, (event) => {
+				const moreButton = this.createPageListActionButton("more-horizontal", `${entry.label} 的操作`, (event) => {
 					this.openMixedPageEntryMenu(entry, event, actions);
 				});
 				actions.append(moreButton);
@@ -7351,9 +7482,9 @@ class NativePdfAnnotatorSession {
 		const renderFilters = (): void => {
 			filters.replaceChildren();
 			for (const filter of [
-				{ id: "all", label: "All", count: countByFilter.all },
-				{ id: "added", label: "Added", count: countByFilter.added },
-				{ id: "removed", label: "Removed", count: countByFilter.removed }
+				{ id: "all", label: "全部", count: countByFilter.all },
+				{ id: "added", label: "已添加", count: countByFilter.added },
+				{ id: "removed", label: "已移除", count: countByFilter.removed }
 			] as const) {
 				const button = filters.createEl("button", { type: "button" });
 				button.className = "pdf-native-annotator-page-list-filter";
@@ -7415,7 +7546,7 @@ class NativePdfAnnotatorSession {
 		this.beginExclusiveMenu();
 		const popover = createDiv();
 		popover.className = "modal pdf-native-annotator-color-popover pdf-native-annotator-paper-popover";
-		const title = popover.createDiv({ cls: "pdf-native-annotator-color-popover-title", text: "Paper colour" });
+		const title = popover.createDiv({ cls: "pdf-native-annotator-color-popover-title", text: "纸色" });
 		title.appendChild(this.createPopoverCloseButton(() => this.closePaperColorPopover()));
 		const swatches = popover.createDiv({ cls: "pdf-native-annotator-color-popover-swatches" });
 		for (const preset of PAPER_COLOR_PRESETS) {
@@ -7423,7 +7554,7 @@ class NativePdfAnnotatorSession {
 			swatch.type = "button";
 			swatch.className = "pdf-native-annotator-swatch";
 			swatch.title = preset.label;
-			swatch.setAttribute("aria-label", `${preset.label} paper`);
+			swatch.setAttribute("aria-label", `${preset.label} 纸`);
 			if (selectedColor.toLowerCase() === preset.color.toLowerCase()) {
 				swatch.classList.add("is-active");
 			}
@@ -7436,7 +7567,7 @@ class NativePdfAnnotatorSession {
 			swatches.appendChild(swatch);
 		}
 		const customRow = popover.createDiv({ cls: "pdf-native-annotator-color-popover-custom" });
-		customRow.createSpan({ text: "Custom" });
+		customRow.createSpan({ text: "自定义" });
 		const colorInput = createEl("input");
 		colorInput.type = "color";
 		colorInput.value = selectedColor;
@@ -7453,25 +7584,25 @@ class NativePdfAnnotatorSession {
 	private openRenameAddedPagePopover(anchor: HTMLElement, pageId: string): void {
 		const target = this.getSyntheticPageById(pageId);
 		if (!target) {
-			new Notice("That added page is no longer available.");
+			new Notice("那张添加页已经不在了。");
 			return;
 		}
 		const anchorRect = anchor.getBoundingClientRect();
 		this.beginExclusiveMenu();
 		const popover = createDiv();
 		popover.className = "modal pdf-native-annotator-rename-popover";
-		const title = popover.createDiv({ cls: "pdf-native-annotator-color-popover-title", text: "Page name" });
+		const title = popover.createDiv({ cls: "pdf-native-annotator-color-popover-title", text: "页面名称" });
 		title.appendChild(this.createPopoverCloseButton(() => this.closeRenamePopover()));
 		const form = popover.createEl("form", { cls: "pdf-native-annotator-rename-form" });
 		const input = form.createEl("input", {
 			type: "text",
-			placeholder: "Page name"
+			placeholder: "页面名称"
 		});
 		input.value = target.page.title;
 		input.className = "pdf-native-annotator-rename-input";
 		const actions = form.createDiv({ cls: "pdf-native-annotator-confirm-actions" });
-		const cancelButton = actions.createEl("button", { type: "button", text: "Cancel" });
-		const saveButton = actions.createEl("button", { type: "submit", text: "Save", cls: "mod-cta" });
+		const cancelButton = actions.createEl("button", { type: "button", text: "取消" });
+		const saveButton = actions.createEl("button", { type: "submit", text: "保存", cls: "mod-cta" });
 		const commitRename = (): void => {
 			this.renameAddedPage(pageId, input.value);
 		};
@@ -7509,12 +7640,12 @@ class NativePdfAnnotatorSession {
 		const target = this.getSyntheticPageById(pageId);
 		const title = rawTitle.trim();
 		if (!target) {
-			new Notice("That added page is no longer available.");
+			new Notice("那张添加页已经不在了。");
 			this.closeRenamePopover();
 			return false;
 		}
 		if (!title) {
-			new Notice("Page name cannot be empty.");
+			new Notice("页面名称不能为空。");
 			return false;
 		}
 		if (title === target.page.title) {
@@ -7524,10 +7655,10 @@ class NativePdfAnnotatorSession {
 		this.pushHistory();
 		target.page.title = title;
 		this.currentPage = target.pageNumber;
-		this.markDirtyAndRedraw("Renamed added page");
+		this.markDirtyAndRedraw("已重命名添加页");
 		this.refreshSyntheticPages(target.pageNumber);
 		this.closeRenamePopover();
-		new Notice(`Renamed page to "${title}"`);
+		new Notice(`页面已重命名为「${title}」`);
 		return true;
 	}
 
@@ -7539,7 +7670,7 @@ class NativePdfAnnotatorSession {
 	private openCurrentAddedPageTemplateMenu(anchor: HTMLElement): void {
 		const page = this.getCurrentSyntheticPage();
 		if (!page) {
-			new Notice("Open an added template page first.");
+			new Notice("请先打开一张已添加的模板页。");
 			return;
 		}
 		const menu = new Menu();
@@ -7554,7 +7685,7 @@ class NativePdfAnnotatorSession {
 	private openCurrentAddedPageSizeMenu(anchor: HTMLElement): void {
 		const page = this.getCurrentSyntheticPage();
 		if (!page) {
-			new Notice("Open an added template page first.");
+			new Notice("请先打开一张已添加的模板页。");
 			return;
 		}
 		const menu = new Menu();
@@ -7569,7 +7700,7 @@ class NativePdfAnnotatorSession {
 	private openCurrentAddedPagePaperColorMenu(anchor: HTMLElement): void {
 		const page = this.getCurrentSyntheticPage();
 		if (!page) {
-			new Notice("Open an added template page first.");
+			new Notice("请先打开一张已添加的模板页。");
 			return;
 		}
 		const menu = new Menu();
@@ -7581,7 +7712,7 @@ class NativePdfAnnotatorSession {
 				run: () => this.setCurrentTemplatePageColorValue(preset.color)
 			})),
 			menuSeparator,
-			{ title: "Custom color...", icon: "palette", run: () => this.openPaperColorPopover(anchor) }
+			{ title: "自定义颜色…", icon: "palette", run: () => this.openPaperColorPopover(anchor) }
 		]);
 		this.showMenuBelowAnchor(menu, anchor);
 	}
@@ -7609,7 +7740,7 @@ class NativePdfAnnotatorSession {
 					const page=entry.pageNumber,surface=this.pageSurfaces.get(page);
 					const nativePage=this.leaf.view.containerEl.querySelector<HTMLElement>(`.page[data-page-number="${page}"]`);
 					const added=this.getAppendedPages()[page-this.realPdfPageCount-1];
-					const size=added?getNotebookPageSizeDimensions(added.pageSize):null;
+					const size=added?getNotebookPageSizeDimensions(added.pageSize, added.customSize):null;
 					const width=surface?.lastWidth||nativePage?.clientWidth||size?.width||1;
 					const height=surface?.lastHeight||nativePage?.clientHeight||size?.height||1.414;
 					return {document:this.annotationDocument!,filePath:this.file!.path,page,strokes:byPage.get(page)!,aspect:height/width};
@@ -7627,14 +7758,14 @@ class NativePdfAnnotatorSession {
 	private openOcrOptions(): void { this.getOcrController().open(); }
 
 	private createOcrButton(): HTMLButtonElement {
-		return this.createIconButton("scan-text", "Handwriting recognition (OCR)", false, () => this.openOcrOptions());
+		return this.createIconButton("scan-text", "手写识别（OCR）", false, () => this.openOcrOptions());
 	}
 
 	private appendOcrControls(group: HTMLElement): void {
 		group.appendChild(this.createOcrButton());
 		if(!this.annotationDocument?.ocrGroups?.some(g=>g.page===this.currentPage))return;
 		const showingText=getOcrPageView(this.annotationDocument,this.currentPage).groups.length>0;
-		const toggle=this.createIconButton(showingText?"pen-line":"type",showingText?"Show original handwriting":"Show recognised text",false,()=>{
+		const toggle=this.createIconButton(showingText?"pen-line":"type",showingText?"显示原始手写":"显示识别文字",false,()=>{
 			this.updateCurrentPageFromScroll?.();
 			const currentText=this.annotationDocument && getOcrPageView(this.annotationDocument,this.currentPage).groups.length>0;
 			void this.getOcrController().run("page",currentText?"ink":"text");
@@ -7645,77 +7776,77 @@ class NativePdfAnnotatorSession {
 
 	private openDocumentActionsMenu(button: HTMLButtonElement): void {
 		const menu = new Menu();
-		menu.addItem(item=>item.setTitle("Handwriting recognition (OCR)...").setIcon("scan-text").onClick(()=>this.openOcrOptions()));
+		menu.addItem(item=>item.setTitle("手写识别（OCR）…").setIcon("scan-text").onClick(()=>this.openOcrOptions()));
 		menu.addItem((item) => item
-			.setTitle("Insert photo...")
+			.setTitle("插入图片…")
 			.setIcon("image-file")
 			.onClick(() => void this.insertPhotoOnCurrentPage()));
 		menu.addItem((item) => item
-			.setTitle("Create blank annotatable PDF...")
+			.setTitle("新建可批注的空白 PDF…")
 			.setIcon("file-plus-2")
 			.onClick(() => this.plugin.openBlankAnnotatablePdfModal()));
 		if (!this.plugin.shouldShowRegionToolbarButton()) {
 			menu.addItem((item) => item
-				.setTitle("Select region embed")
+				.setTitle("选择区域嵌入")
 				.setIcon("crop")
 				.onClick(() => {
 					this.setActiveTool("region");
 					this.applyOverlayMode();
 					this.refreshToolbar();
-					this.refreshStatus("Region tool: drag a crop box");
+					this.refreshStatus("区域工具：拖出一个裁剪框");
 				}));
 		}
 		menu.addSeparator();
 		menu.addItem((item) => item
-			.setTitle("Copy current page link")
+			.setTitle("复制当前页链接")
 			.setIcon("link")
 			.onClick(() => void this.copyCurrentPageLink()));
 		menu.addItem((item) => item
-			.setTitle("Copy annotated page embed")
+			.setTitle("复制带批注的页面嵌入")
 			.setIcon("code")
 			.onClick(() => void this.copyCurrentPageEmbedBlock()));
 		if (this.selectedTargets.length > 0) {
 			menu.addItem((item) => item
-				.setTitle("Copy selection")
+				.setTitle("复制所选内容")
 				.setIcon("copy")
 				.onClick(() => this.copySelectedTargets()));
 			if (this.plugin.getOcrSettings?.().copyHandwritingAsText) menu.addItem(item => item
-				.setTitle("Copy handwriting").setIcon("pen-line").onClick(() => this.copySelectedTargets(true)));
+				.setTitle("复制手写").setIcon("pen-line").onClick(() => this.copySelectedTargets(true)));
 			menu.addItem((item) => item
-				.setTitle("Duplicate selection")
+				.setTitle("复制造区")
 				.setIcon("copy-plus")
 				.onClick(() => this.duplicateSelectedTargets()));
 			menu.addItem((item) => item
-				.setTitle("Delete selection")
+				.setTitle("删除所选内容")
 				.setIcon("trash")
 				.setWarning(true)
 				.onClick(() => this.deleteSelectedTargets()));
 		}
 		if (this.plugin.hasClipboard()) {
 			menu.addItem((item) => item
-				.setTitle("Paste copied annotations")
+				.setTitle("粘贴批注")
 				.setIcon("clipboard")
 				.onClick(() => this.pasteClipboard()));
 		}
 		menu.addSeparator();
 		menu.addItem((item) => item
-			.setTitle("Current page snapshot")
+			.setTitle("当前页快照")
 			.setIcon("image-file")
 			.onClick(() => void this.exportCurrentPageSnapshot()));
 		menu.addItem((item) => item
-			.setTitle("Annotated mixed PDF")
+			.setTitle("带批注的混合 PDF")
 			.setIcon("file-output")
 			.onClick(() => void this.exportAnnotatedMixedDocumentPdf()));
 		menu.addSeparator();
 		menu.addItem((item) => item
-			.setTitle("Open annotation data JSON")
+			.setTitle("打开批注数据 JSON")
 			.setIcon("database")
 			.onClick(() => void this.openAnnotationDataJson()));
-		menu.addItem(item => item.setTitle("Recover annotations from JSON").setIcon("history")
+		menu.addItem(item => item.setTitle("从 JSON 恢复批注").setIcon("history")
 			.onClick(() => void this.restoreAnnotationDataFromJson()));
 		if (this.shouldShowRelinkAnnotationDataAction()) {
 			menu.addItem((item) => item
-				.setTitle("Relink annotation data")
+				.setTitle("重新关联批注数据")
 				.setIcon("replace")
 				.onClick(() => void this.relinkAnnotationDataToCurrentPdf()));
 		}
@@ -7732,20 +7863,20 @@ class NativePdfAnnotatorSession {
 		const beforeLocation = this.getNativeInsertPageLocation("before");
 		const quickDefaults = this.getQuickAddPageOptions(afterLocation);
 		menu.addItem((item) => item
-			.setTitle("Manage pages...")
+			.setTitle("管理页面…")
 			.setIcon("files")
 			.onClick(() => this.openPageListPopover(button)));
 		menu.addSeparator();
 		menu.addItem((item) => item
-			.setTitle("Quick add after current")
+			.setTitle("在当前页后快速添加")
 			.setIcon("plus")
 			.onClick(() => this.insertTemplatePageAtLocation(afterLocation, quickDefaults)));
 		menu.addItem((item) => item
-			.setTitle("Add before...")
+			.setTitle("在之前添加…")
 			.setIcon("file-plus")
 			.onClick(() => this.openTemplatePageInsertModalAtLocation("before", beforeLocation)));
 		menu.addItem((item) => item
-			.setTitle("Add after...")
+			.setTitle("在之后添加…")
 			.setIcon("file-plus")
 			.onClick(() => this.openTemplatePageInsertModalAtLocation("after", afterLocation)));
 		if (currentSyntheticPage) {
@@ -7755,32 +7886,32 @@ class NativePdfAnnotatorSession {
 				.setIcon("pencil")
 				.onClick(() => this.openRenameAddedPagePopover(button, currentSyntheticPage.id)));
 			menu.addItem((item) => item
-				.setTitle("Duplicate with annotations")
+				.setTitle("连同批注一起复制")
 				.setIcon("copy")
 				.onClick(() => this.duplicateCurrentTemplatePage()));
 			menu.addItem((item) => item
-				.setTitle("Duplicate page only")
+				.setTitle("只复制页面")
 				.setIcon("copy-plus")
 				.onClick(() => this.duplicateCurrentTemplatePage(false)));
 			menu.addItem((item) => item
-				.setTitle(`Template: ${getNotebookTemplateLabel(currentSyntheticPage.template)}`)
+				.setTitle(`模板：${getNotebookTemplateLabel(currentSyntheticPage.template)}`)
 				.setIcon("rows-3")
 				.onClick(() => this.openCurrentAddedPageTemplateMenu(button)));
 			menu.addItem((item) => item
-				.setTitle(`Size: ${getNotebookPageSizeLabel(currentSyntheticPage.pageSize)}`)
+				.setTitle(`大小：${getNotebookPageSizeLabel(currentSyntheticPage.pageSize)}`)
 				.setIcon("maximize-2")
 				.onClick(() => this.openCurrentAddedPageSizeMenu(button)));
-			const currentPaper = PAPER_COLOR_PRESETS.find((preset) => preset.color.toLowerCase() === currentSyntheticPage.paperColor.toLowerCase())?.label ?? "Custom";
+			const currentPaper = PAPER_COLOR_PRESETS.find((preset) => preset.color.toLowerCase() === currentSyntheticPage.paperColor.toLowerCase())?.label ?? "自定义";
 			menu.addItem((item) => item
-				.setTitle(`Paper: ${currentPaper}`)
+				.setTitle(`纸色：${currentPaper}`)
 				.setIcon("palette")
 				.onClick(() => this.openCurrentAddedPagePaperColorMenu(button)));
 			menu.addItem((item) => item
-				.setTitle("Clear contents")
+				.setTitle("清空内容")
 				.setIcon("eraser")
 				.onClick(() => this.clearCurrentTemplatePageContents()));
 			menu.addItem((item) => item
-				.setTitle("Move to Removed")
+				.setTitle("移到已移除")
 				.setIcon("trash")
 				.setWarning(true)
 				.onClick(() => this.deleteCurrentPage()));
@@ -7789,24 +7920,24 @@ class NativePdfAnnotatorSession {
 			const pageTemplate = this.canEditPdfPageTemplate(currentPageNumber) ? this.getPdfPageTemplate(currentPageNumber) : null;
 			if (pageTemplate) {
 				menu.addItem(item => item
-					.setTitle(`Template: ${getNotebookTemplateLabel(pageTemplate.template)}`)
+					.setTitle(`模板：${getNotebookTemplateLabel(pageTemplate.template)}`)
 					.setIcon("rows-3")
 					.onClick(event => this.openPdfPageTemplateMenu(currentPageNumber, event, button)));
-				const paperLabel = PAPER_COLOR_PRESETS.find(preset => preset.color.toLowerCase() === pageTemplate.paperColor.toLowerCase())?.label ?? "Custom";
+				const paperLabel = PAPER_COLOR_PRESETS.find(preset => preset.color.toLowerCase() === pageTemplate.paperColor.toLowerCase())?.label ?? "自定义";
 				menu.addItem(item => item
-					.setTitle(`Paper: ${paperLabel}`)
+					.setTitle(`纸色：${paperLabel}`)
 					.setIcon("palette")
 					.onClick(event => this.openPdfPagePaperColorMenu(currentPageNumber, event, button)));
 				menu.addSeparator();
 			}
 			menu.addItem((item) => item
-				.setTitle("Remove from this session")
+				.setTitle("从本次会话中移除")
 				.setIcon("trash")
 				.onClick(() => this.deleteCurrentPage()));
 		}
 		menu.addSeparator();
 		menu.addItem((item) => item
-			.setTitle("Export annotated PDF")
+			.setTitle("导出带批注的 PDF")
 			.setIcon("file-output")
 			.onClick(() => void this.exportAnnotatedMixedDocumentPdf()));
 		const rect = button.getBoundingClientRect();
@@ -7823,7 +7954,7 @@ class NativePdfAnnotatorSession {
 		header.appendChild(this.createPopoverCloseButton(() => this.closeConfirmPopover()));
 		popover.createDiv({ cls: "pdf-native-annotator-confirm-message", text: message });
 		const actions = popover.createDiv({ cls: "pdf-native-annotator-confirm-actions" });
-		const cancelButton = actions.createEl("button", { type: "button", text: "Cancel" });
+		const cancelButton = actions.createEl("button", { type: "button", text: "取消" });
 		const confirmButton = actions.createEl("button", { type: "button", text: confirmText, cls: "mod-warning" });
 		cancelButton.addEventListener("click", () => this.closeConfirmPopover());
 		confirmButton.addEventListener("click", () => {
@@ -7851,7 +7982,7 @@ class NativePdfAnnotatorSession {
 		}
 		page.paperColor = color;
 		this.recordLatestPageStyle(page);
-		this.markDirtyAndRedraw("Paper color changed");
+		this.markDirtyAndRedraw("已更改纸色");
 		this.refreshSyntheticPages(this.currentPage);
 	}
 
@@ -7859,9 +7990,9 @@ class NativePdfAnnotatorSession {
 		this.beginExclusiveMenu();
 		const popover = createDiv();
 		popover.className = "modal pdf-native-annotator-font-popover";
-		const title = popover.createDiv({ cls: "pdf-native-annotator-font-popover-title", text: "Text style" });
+		const title = popover.createDiv({ cls: "pdf-native-annotator-font-popover-title", text: "文字样式" });
 		title.appendChild(this.createPopoverCloseButton(() => this.closeFontPopover()));
-		const preview = popover.createDiv({ cls: "pdf-native-annotator-font-preview", text: "The quick brown fox" });
+		const preview = popover.createDiv({ cls: "pdf-native-annotator-font-preview", text: "敏捷的棕色狐狸 The quick brown fox" });
 		const selectionSummary = popover.createDiv({ cls: "pdf-native-annotator-font-selection-summary" });
 		let fontSelect: HTMLSelectElement | null = null;
 		let sizeInput: HTMLInputElement | null = null;
@@ -7962,7 +8093,7 @@ class NativePdfAnnotatorSession {
 			syncPopoverState();
 		});
 		const customSizeRow = popover.createDiv({ cls: "pdf-native-annotator-font-control-row" });
-		customSizeRow.createSpan({ text: "Font size" });
+		customSizeRow.createSpan({ text: "字号" });
 		sizeInput = customSizeRow.createEl("input", {
 			type: "number",
 			cls: "pdf-native-annotator-font-number-input",
@@ -7979,26 +8110,26 @@ class NativePdfAnnotatorSession {
 			syncPopoverState();
 		});
 		const formatRow = popover.createDiv({ cls: "pdf-native-annotator-text-style-row" });
-		formatRow.createSpan({ cls: "pdf-native-annotator-text-style-label", text: "Style" });
+		formatRow.createSpan({ cls: "pdf-native-annotator-text-style-label", text: "样式" });
 		const formatControls = formatRow.createDiv({ cls: "pdf-native-annotator-text-style-group" });
-		boldButton = createStyleButton(formatControls, "bold", "Bold", () => {
+		boldButton = createStyleButton(formatControls, "bold", "加粗", () => {
 			this.setTextFontWeight(this.getCurrentTextFontWeightForMenu() === "bold" ? "normal" : "bold");
 		});
-		italicButton = createStyleButton(formatControls, "italic", "Italic", () => {
+		italicButton = createStyleButton(formatControls, "italic", "斜体", () => {
 			this.setTextFontStyle(this.getCurrentTextFontStyleForMenu() === "italic" ? "normal" : "italic");
 		});
 		const alignmentRow = popover.createDiv({ cls: "pdf-native-annotator-text-style-row" });
-		alignmentRow.createSpan({ cls: "pdf-native-annotator-text-style-label", text: "Alignment" });
+		alignmentRow.createSpan({ cls: "pdf-native-annotator-text-style-label", text: "对齐" });
 		const alignmentControls = alignmentRow.createDiv({ cls: "pdf-native-annotator-text-style-group" });
 		for (const alignment of ["left", "center", "right"] as TextAlignment[]) {
-			const label = `${alignment[0].toUpperCase()}${alignment.slice(1)} align`;
+			const label = ({ left: "靠左对齐", center: "居中对齐", right: "靠右对齐" } as Record<string, string>)[alignment] ?? alignment;
 			const alignmentButton = createStyleButton(alignmentControls, `align-${alignment}`, label, () => {
 				this.setTextAlignment(alignment);
 			});
 			alignmentButtons.set(alignment, alignmentButton);
 		}
 		const verticalAlignmentRow = popover.createDiv({ cls: "pdf-native-annotator-text-style-row" });
-		verticalAlignmentRow.createSpan({ cls: "pdf-native-annotator-text-style-label", text: "Vertical" });
+		verticalAlignmentRow.createSpan({ cls: "pdf-native-annotator-text-style-label", text: "垂直" });
 		const verticalAlignmentControls = verticalAlignmentRow.createDiv({ cls: "pdf-native-annotator-text-style-group" });
 		const verticalAlignmentIcons: Record<TextVerticalAlignment, string> = {
 			top: "align-vertical-justify-start",
@@ -8006,7 +8137,7 @@ class NativePdfAnnotatorSession {
 			bottom: "align-vertical-justify-end"
 		};
 		for (const alignment of ["top", "middle", "bottom"] as TextVerticalAlignment[]) {
-			const label = `${alignment[0].toUpperCase()}${alignment.slice(1)} align`;
+			const label = ({ top: "顶端对齐", middle: "垂直居中", bottom: "底端对齐" } as Record<string, string>)[alignment] ?? alignment;
 			const alignmentButton = createStyleButton(
 				verticalAlignmentControls,
 				verticalAlignmentIcons[alignment],
@@ -8016,7 +8147,7 @@ class NativePdfAnnotatorSession {
 			verticalAlignmentButtons.set(alignment, alignmentButton);
 		}
 		const lineSpacingRow = popover.createDiv({ cls: "pdf-native-annotator-font-control-row" });
-		lineSpacingRow.createSpan({ text: "Line spacing" });
+		lineSpacingRow.createSpan({ text: "行距" });
 		lineSpacingInput = lineSpacingRow.createEl("input", {
 			type: "number",
 			cls: "pdf-native-annotator-font-number-input",
@@ -8032,26 +8163,26 @@ class NativePdfAnnotatorSession {
 			syncPopoverState();
 		});
 		const layoutRow = popover.createDiv({ cls: "pdf-native-annotator-text-style-row" });
-		layoutRow.createSpan({ cls: "pdf-native-annotator-text-style-label", text: "Text box" });
+		layoutRow.createSpan({ cls: "pdf-native-annotator-text-style-label", text: "文本框" });
 		const layoutControls = layoutRow.createDiv({ cls: "pdf-native-annotator-text-style-group" });
-		wordWrapButton = createStyleButton(layoutControls, "wrap-text", "Toggle word wrap", () => {
+		wordWrapButton = createStyleButton(layoutControls, "wrap-text", "切换自动换行", () => {
 			this.setTextWordWrap(!this.getCurrentTextWordWrapForMenu());
 		});
-		autoFitButton = createStyleButton(layoutControls, "scan-text", "Resize box to fit text", () => {
+		autoFitButton = createStyleButton(layoutControls, "scan-text", "文本框随文字调整大小", () => {
 			this.setTextAutoFit(true);
 		});
-		fixedBoxButton = createStyleButton(layoutControls, "square", "Keep text box size fixed", () => {
+		fixedBoxButton = createStyleButton(layoutControls, "square", "固定文本框大小", () => {
 			this.setTextAutoFit(false);
 		});
 		const caseRow = popover.createDiv({ cls: "pdf-native-annotator-font-control-row" });
-		caseRow.createSpan({ text: "Change case" });
+		caseRow.createSpan({ text: "切换大小写" });
 		const caseSelect = caseRow.createEl("select", { cls: "dropdown pdf-native-annotator-case-select" });
-		caseSelect.createEl("option", { text: "Choose...", value: "" });
-		caseSelect.createEl("option", { text: "Sentence case", value: "sentence" });
-		caseSelect.createEl("option", { text: "lowercase", value: "lower" });
-		caseSelect.createEl("option", { text: "UPPERCASE", value: "upper" });
-		caseSelect.createEl("option", { text: "Title Case", value: "title" });
-		caseSelect.createEl("option", { text: "tOGGLE cASE", value: "toggle" });
+		caseSelect.createEl("option", { text: "请选择…", value: "" });
+		caseSelect.createEl("option", { text: "句首大写", value: "sentence" });
+		caseSelect.createEl("option", { text: "全部小写", value: "lower" });
+		caseSelect.createEl("option", { text: "全部大写", value: "upper" });
+		caseSelect.createEl("option", { text: "每个词首字母大写", value: "title" });
+		caseSelect.createEl("option", { text: "大小写互换", value: "toggle" });
 		caseSelect.addEventListener("change", () => {
 			const mode = caseSelect.value as "sentence" | "lower" | "upper" | "title" | "toggle" | "";
 			if (mode) {
@@ -8090,21 +8221,21 @@ class NativePdfAnnotatorSession {
 		const wrappingModes = new Set(items.map((item) => resolveTextWordWrap(item)));
 		const fitModes = new Set(items.map((item) => item.autoFit === true));
 		const mixed = [
-			families.size > 1 ? "font" : null,
-			sizes.size > 1 ? "size" : null,
-			colors.size > 1 ? "color" : null,
-			widths.size > 1 ? "box" : null,
-			weights.size > 1 ? "weight" : null,
-			styles.size > 1 ? "style" : null,
-			alignments.size > 1 ? "alignment" : null,
-			verticalAlignments.size > 1 ? "vertical alignment" : null,
-			lineSpacings.size > 1 ? "line spacing" : null,
-			wrappingModes.size > 1 ? "wrapping" : null,
-			fitModes.size > 1 ? "fit mode" : null
+			families.size > 1 ? "字体" : null,
+			sizes.size > 1 ? "字号" : null,
+			colors.size > 1 ? "颜色" : null,
+			widths.size > 1 ? "文本框宽度" : null,
+			weights.size > 1 ? "粗细" : null,
+			styles.size > 1 ? "样式" : null,
+			alignments.size > 1 ? "对齐" : null,
+			verticalAlignments.size > 1 ? "垂直对齐" : null,
+			lineSpacings.size > 1 ? "行距" : null,
+			wrappingModes.size > 1 ? "换行" : null,
+			fitModes.size > 1 ? "自适应方式" : null
 		].filter((entry): entry is string => !!entry);
 		return mixed.length > 0
-			? `${items.length} text boxes selected; mixed ${mixed.join(", ")}. Changes apply to all selected text boxes.`
-			: `${items.length} text boxes selected. Changes apply to all selected text boxes.`;
+			? `已选中 ${items.length} 个文本框；${mixed.join("、")}不一致。更改会应用到所有选中的文本框。`
+			: `已选中 ${items.length} 个文本框。更改会应用到所有选中的文本框。`;
 	}
 
 	private getCurrentTextFontFamilyForMenu(): string {
@@ -8252,17 +8383,17 @@ class NativePdfAnnotatorSession {
 		const leftGroup = createDiv();
 		leftGroup.className = "pdf-native-annotator-group is-tools";
 		leftGroup.setAttribute("role", "group");
-		leftGroup.setAttribute("aria-label", "Drawing tools");
+		leftGroup.setAttribute("aria-label", "绘图工具");
 		const optionsGroup = separateOptions ? createDiv() : leftGroup;
 		const trailingToolButtons: HTMLButtonElement[] = [];
 		const quickOptions = (this.plugin.getToolOptionsPresentation?.() ?? "buttons") === "buttons";
 		if (separateOptions) {
 			optionsGroup.className = "pdf-native-annotator-group is-tool-options";
 			optionsGroup.setAttribute("role", "group");
-			optionsGroup.setAttribute("aria-label", "Tool options");
+			optionsGroup.setAttribute("aria-label", "工具选项");
 		}
 
-		const annotationButton = this.createButton(this.annotationMode ? "Finish" : "Annotate", this.annotationMode, () => {
+		const annotationButton = this.createButton(this.annotationMode ? "完成" : "批注", this.annotationMode, () => {
 			this.toggleAnnotationMode();
 		});
 		annotationButton.classList.add("pdf-native-annotator-annotation-toggle");
@@ -8270,7 +8401,7 @@ class NativePdfAnnotatorSession {
 		if (!this.annotationMode) {
 			const readModeHint = createSpan();
 			readModeHint.className = "pdf-native-annotator-read-mode-hint";
-			readModeHint.textContent = "Read mode";
+			readModeHint.textContent = "阅读模式";
 			leftGroup.appendChild(readModeHint);
 
 			const rightGroup = createDiv();
@@ -8278,13 +8409,13 @@ class NativePdfAnnotatorSession {
 			if(this.plugin.getOcrSettings?.()?.showToolbarButton)this.appendOcrControls(rightGroup);
 			const addPageButton = this.createPageMenuButton();
 			rightGroup.appendChild(addPageButton);
-			const moreButton = this.createIconButton("more-vertical", "More annotation actions", false, () => {
+			const moreButton = this.createIconButton("more-vertical", "更多批注操作", false, () => {
 				this.openDocumentActionsMenu(moreButton);
 			});
 			rightGroup.appendChild(moreButton);
 
 			rightGroup.setAttribute("role", "group");
-			rightGroup.setAttribute("aria-label", "Document actions");
+			rightGroup.setAttribute("aria-label", "文档操作");
 			rightGroup.scrollLeft = previousActionsScrollLeft;
 			this.toolbarEl.appendChild(leftGroup);
 			this.toolbarEl.appendChild(rightGroup);
@@ -8296,19 +8427,19 @@ class NativePdfAnnotatorSession {
 		if (isTabletWebKitTouchDevice()) {
 			const touchDrawing = this.getInkInputPolicy() !== "pen-mouse-only";
 			const touchModeButton = this.createButton(
-				touchDrawing ? "Finger draws" : "Finger pans",
+				touchDrawing ? "手指书写" : "手指平移",
 				touchDrawing,
 				() => this.toggleTabletTouchInputMode()
 			);
 			touchModeButton.classList.add("pdf-native-annotator-mode-button", "pdf-native-annotator-touch-mode-button");
 			touchModeButton.setAttribute("aria-pressed", String(touchDrawing));
 			touchModeButton.title = touchDrawing
-				? "Finger draws annotations. Tap to pan the page with one finger."
-				: "Finger pans the page. Apple Pencil and mouse continue drawing.";
+				? "手指会绘制批注。点此改为单指平移页面。"
+				: "手指平移页面。Apple Pencil 和鼠标仍可绘制。";
 			trailingToolButtons.push(touchModeButton);
 		}
 		let selectButton: HTMLButtonElement;
-		selectButton = this.createIconButton("move", "Select", this.currentTool === "select", () => {
+		selectButton = this.createIconButton("move", "选择", this.currentTool === "select", () => {
 			if (this.currentTool === "select") {
 				if (!quickOptions) this.openSelectionMenu(selectButton);
 				return;
@@ -8320,39 +8451,39 @@ class NativePdfAnnotatorSession {
 		leftGroup.appendChild(selectButton);
 		if (this.currentTool === "select" && quickOptions) {
 			const selectionModeButton = this.createButton(
-				this.toolState.selectionMode === "lasso" ? "Lasso" : this.toolState.selectionMode === "box" ? "Box" : "Single",
+				this.toolState.selectionMode === "lasso" ? "套索" : this.toolState.selectionMode === "box" ? "框选" : "单选",
 				false,
 				() => {
 					this.setSelectionMode(this.toolState.selectionMode === "single" ? "box" : this.toolState.selectionMode === "box" ? "lasso" : "single");
 				}
 			);
 			selectionModeButton.classList.add("pdf-native-annotator-mode-button");
-			selectionModeButton.title = "Selection mode. Click to cycle Single, Box and Lasso.";
+			selectionModeButton.title = "选择模式。点击可在单选、框选和套索之间切换。";
 			trailingToolButtons.push(selectionModeButton);
 		}
 		if (this.plugin.shouldShowRegionToolbarButton()) {
-			leftGroup.appendChild(this.createIconButton("crop", "Region embed", this.currentTool === "region", () => {
+			leftGroup.appendChild(this.createIconButton("crop", "区域嵌入", this.currentTool === "region", () => {
 				this.setActiveTool("region");
 				this.applyOverlayMode();
 				this.refreshToolbar();
-				this.refreshStatus("Region tool: drag a crop box");
+				this.refreshStatus("区域工具：拖出一个裁剪框");
 			}));
 		}
-		const penButton=this.createIconButton("pen-tool", "Pen", this.currentTool === "pen", () => {
+		const penButton=this.createIconButton("pen-tool", "笔", this.currentTool === "pen", () => {
 			if(this.currentTool==="pen"){if(!quickOptions)this.openInkToolOptions(penButton,"pen");return;}
 			this.setActiveTool("pen");
 			this.applyOverlayMode();
 			this.refreshToolbar();
 		});
 		leftGroup.appendChild(penButton);
-		const highlighterButton=this.createIconButton("highlighter", "Highlighter", this.currentTool === "highlighter", () => {
+		const highlighterButton=this.createIconButton("highlighter", "荧光笔", this.currentTool === "highlighter", () => {
 			if(this.currentTool==="highlighter"){if(!quickOptions)this.openInkToolOptions(highlighterButton,"highlighter");return;}
 			this.setActiveTool("highlighter");
 			this.applyOverlayMode();
 			this.refreshToolbar();
 		});
 		leftGroup.appendChild(highlighterButton);
-		const eraserButton = this.createIconButton("eraser", `Eraser (${this.eraserMode})`, this.currentTool === "eraser", () => {
+		const eraserButton = this.createIconButton("eraser", `橡皮（${this.eraserMode}）`, this.currentTool === "eraser", () => {
 			if (this.currentTool === "eraser") {
 				if (!quickOptions) { this.openEraserModeMenu(eraserButton); return; }
 				this.toggleEraserMode();
@@ -8361,12 +8492,12 @@ class NativePdfAnnotatorSession {
 			this.setActiveTool("eraser");
 			this.applyOverlayMode();
 			this.refreshToolbar();
-			this.refreshStatus(`Tool: Eraser (${this.eraserMode})`);
+			this.refreshStatus(`工具：橡皮（${this.eraserMode}）`);
 		});
 		leftGroup.appendChild(eraserButton);
 		if (this.currentTool === "eraser" && quickOptions) {
 			const eraserModeButton = this.createButton(
-				this.eraserMode === "segment" ? "Touch erase" : "Object erase",
+				this.eraserMode === "segment" ? "触碰擦除" : "整对象擦除",
 				false,
 				() => {
 					this.toggleEraserMode();
@@ -8375,14 +8506,14 @@ class NativePdfAnnotatorSession {
 			eraserModeButton.classList.add("pdf-native-annotator-mode-button");
 			trailingToolButtons.push(eraserModeButton);
 		}
-		leftGroup.appendChild(this.createIconButton("type", "Text", this.currentTool === "text", () => {
-			if (this.currentTool === "text") { const anchor = this.toolbarEl?.querySelector<HTMLButtonElement>("[aria-label='Text']"); if (!quickOptions && anchor) this.openTextStyleMenu(anchor); return; }
+		leftGroup.appendChild(this.createIconButton("type", "文字", this.currentTool === "text", () => {
+			if (this.currentTool === "text") { const anchor = this.toolbarEl?.querySelector<HTMLButtonElement>("[aria-label='文字']"); if (!quickOptions && anchor) this.openTextStyleMenu(anchor); return; }
 			this.setActiveTool("text");
 			this.applyOverlayMode();
 			this.refreshToolbar();
 		}));
 		const shapeButton = this.createIconButton(
-			"shapes", this.toolState.shapeOptions.method === "drag" ? "Shapes: Drag to size" : "Shapes: Draw and hold",
+			"shapes", this.toolState.shapeOptions.method === "drag" ? "形状：拖拽定大小" : "形状：画完后按住",
 			isShapeTool(this.currentTool), () => this.openShapeToolMenu(shapeButton)
 		);
 		shapeButton.classList.add("pdf-native-annotator-shape-menu-button");
@@ -8411,7 +8542,7 @@ class NativePdfAnnotatorSession {
 		}
 
 		if (quickOptions && (this.currentTool === "text" || (this.currentTool === "select" && this.hasSelectedText()))) {
-			const textStyleButton = this.createButton("Font", false, () => {
+			const textStyleButton = this.createButton("字体", false, () => {
 				this.openTextStyleMenu(textStyleButton);
 			});
 			textStyleButton.classList.add("pdf-native-annotator-mode-button", "pdf-native-annotator-font-button");
@@ -8441,7 +8572,7 @@ class NativePdfAnnotatorSession {
 		if(this.plugin.getOcrSettings?.()?.showToolbarButton)this.appendOcrControls(rightGroup);
 
 		if (this.selectedTargets.length > 0) {
-			const selectionLabel = `Selection ${this.selectedTargets.length}`;
+			const selectionLabel = `已选 ${this.selectedTargets.length}`;
 			const selectionActionsButton = this.createButton(selectionLabel, false, () => {
 				this.openSelectionActionsMenu(selectionActionsButton);
 			});
@@ -8449,28 +8580,28 @@ class NativePdfAnnotatorSession {
 			rightGroup.appendChild(selectionActionsButton);
 		}
 		if (this.lastSelectionRegion) {
-			const regionActionsButton = this.createButton("Region", false, () => {
+			const regionActionsButton = this.createButton("区域", false, () => {
 				this.openRegionActionsMenu(regionActionsButton);
 			});
 			regionActionsButton.classList.add("pdf-native-annotator-mode-button");
 			rightGroup.appendChild(regionActionsButton);
 		}
 		if (this.lastSelectionRegion && this.plugin.shouldShowCopyEmbedToolbarButton()) {
-			const copyRegionButton = this.createButton("Copy embed", false, () => {
+			const copyRegionButton = this.createButton("复制嵌入", false, () => {
 				void this.copySelectionAnnotatedEmbedBlock();
 			});
 			copyRegionButton.classList.add("pdf-native-annotator-mode-button");
-			copyRegionButton.title = "Copy an annotated markdown embed for the selected box region";
+			copyRegionButton.title = "复制所选框选区域的带批注 Markdown 嵌入";
 			rightGroup.appendChild(copyRegionButton);
 		}
 		if (this.plugin.hasClipboard()) {
-			rightGroup.appendChild(this.createIconButton("clipboard", "Paste copied annotations", false, () => this.pasteClipboard()));
+			rightGroup.appendChild(this.createIconButton("clipboard", "粘贴批注", false, () => this.pasteClipboard()));
 		}
-		rightGroup.appendChild(this.createHistoryIconButton("undo-2", "Undo", () => this.undoFromToolbar()));
-		rightGroup.appendChild(this.createHistoryIconButton("redo-2", "Redo", () => this.redoFromToolbar()));
+		rightGroup.appendChild(this.createHistoryIconButton("undo-2", "撤销", () => this.undoFromToolbar()));
+		rightGroup.appendChild(this.createHistoryIconButton("redo-2", "重做", () => this.redoFromToolbar()));
 		const addPageButton = this.createPageMenuButton();
 		rightGroup.appendChild(addPageButton);
-		const moreButton = this.createIconButton("more-vertical", "More annotation actions", false, () => {
+		const moreButton = this.createIconButton("more-vertical", "更多批注操作", false, () => {
 			this.openDocumentActionsMenu(moreButton);
 		});
 		rightGroup.appendChild(moreButton);
@@ -8479,7 +8610,7 @@ class NativePdfAnnotatorSession {
 		if (separateOptions) this.toolbarEl.appendChild(optionsGroup);
 		this.toolbarEl.appendChild(rightGroup);
 		rightGroup.setAttribute("role", "group");
-		rightGroup.setAttribute("aria-label", "Document actions");
+		rightGroup.setAttribute("aria-label", "文档操作");
 		rightGroup.scrollLeft = previousActionsScrollLeft;
 		this.toolbarEl.scrollTop = previousToolbarScrollTop;
 		this.toolbarEl.scrollLeft = previousToolbarScrollLeft;
@@ -8557,10 +8688,10 @@ class NativePdfAnnotatorSession {
 		const button = createEl("button");
 		button.type = "button";
 		button.className = "pdf-native-annotator-button pdf-native-annotator-labeled-icon-button pdf-native-annotator-page-menu-button";
-		button.setAttribute("aria-label", "Page");
-		button.title = "Navigate, add, and manage pages";
+		button.setAttribute("aria-label", "页面");
+		button.title = "翻页、添加和管理页面";
 		setIcon(button, "files");
-		button.createSpan({ text: "Page" });
+		button.createSpan({ text: "页面" });
 		let openedFromPointerDown = false;
 		button.addEventListener("pointerdown", (event) => {
 			event.stopPropagation();
@@ -8641,8 +8772,8 @@ class NativePdfAnnotatorSession {
 		const button = createEl("button");
 		button.type = "button";
 		button.className = "modal-close-button clickable-icon pdf-native-annotator-popover-close";
-		button.setAttribute("aria-label", "Close");
-		button.title = "Close";
+		button.setAttribute("aria-label", "关闭");
+		button.title = "关闭";
 		setIcon(button, "x");
 		button.addEventListener("pointerdown", (event) => {
 			event.stopPropagation();
@@ -8701,7 +8832,7 @@ class NativePdfAnnotatorSession {
 		}
 		const shapePopover = this.transientPopovers.get("shape");
 		const inkTool = shapePopover?.dataset.inkTool;
-		const shapeAnchor = this.toolbarEl.querySelector<HTMLElement>(inkTool === "pen" ? "[aria-label='Pen drawing options']" : inkTool === "highlighter" ? "[aria-label='Highlighter drawing options']" : "[aria-label^='Shapes']");
+		const shapeAnchor = this.toolbarEl.querySelector<HTMLElement>(inkTool === "pen" ? "[aria-label='笔绘制选项']" : inkTool === "highlighter" ? "[aria-label='荧光笔绘制选项']" : "[aria-label^='形状']");
 		if (shapePopover && shapeAnchor) this.positionPopoverNearAnchor(shapePopover, shapeAnchor);
 		const strokeAnchor = this.toolbarEl.querySelector<HTMLElement>(".pdf-native-annotator-stroke-button");
 		const strokePopover = this.transientPopovers.get("stroke");
@@ -8814,8 +8945,8 @@ class NativePdfAnnotatorSession {
 		const button = createEl("button");
 		button.type = "button";
 		button.className = "pdf-native-annotator-color-button";
-		button.title = "Choose color";
-		button.setAttribute("aria-label", this.usesTextColorControl() ? "Choose text color" : "Choose ink color");
+		button.title = "选择颜色";
+		button.setAttribute("aria-label", this.usesTextColorControl() ? "选择文字颜色" : "选择墨水颜色");
 		const preview = button.createSpan({ cls: "pdf-native-annotator-color-button-preview" });
 		preview.setCssStyles({ backgroundColor: this.getToolbarColor() });
 		this.bindToolbarButtonActivation(button, () => {
@@ -8831,7 +8962,7 @@ class NativePdfAnnotatorSession {
 		const controlsTextColor = this.usesTextColorControl();
 		const title = popover.createDiv({
 			cls: "pdf-native-annotator-color-popover-title",
-			text: controlsTextColor ? "Text color" : "Ink color"
+			text: controlsTextColor ? "文字颜色" : "笔迹颜色"
 		});
 		title.appendChild(this.createPopoverCloseButton(() => this.closeColorPopover()));
 		const swatches = popover.createDiv({ cls: "pdf-native-annotator-color-popover-swatches" });
@@ -8843,7 +8974,7 @@ class NativePdfAnnotatorSession {
 			swatches.appendChild(swatch);
 		}
 		const customRow = popover.createDiv({ cls: "pdf-native-annotator-color-popover-custom" });
-		customRow.createSpan({ text: "Custom" });
+		customRow.createSpan({ text: "自定义" });
 		const colorInput = createEl("input");
 		colorInput.type = "color";
 		colorInput.value = this.getToolbarColor();
@@ -8959,8 +9090,8 @@ class NativePdfAnnotatorSession {
 		slider.step = String(widthRange.step);
 		slider.value = String(initialWidth);
 		const tickRow = sliderWrap.createDiv({ cls: "pdf-native-annotator-stroke-ticks" });
-		tickRow.createSpan({ text: "Thin" });
-		tickRow.createSpan({ text: "Thick" });
+		tickRow.createSpan({ text: "细" });
+		tickRow.createSpan({ text: "粗" });
 		let historyCaptured = false;
 		slider.addEventListener("input", () => {
 			if (!historyCaptured && this.shouldApplyStyleToSelection()) {
@@ -9036,18 +9167,18 @@ class NativePdfAnnotatorSession {
 
 	private getStrokePopoverTitle(): string {
 		if (this.currentTool === "eraser") {
-			return "Eraser thickness";
+			return "橡皮粗细";
 		}
 		if (this.currentTool === "highlighter") {
-			return "Highlighter thickness";
+			return "荧光笔粗细";
 		}
 		if (this.currentTool === "line") {
-			return "Line thickness";
+			return "线条粗细";
 		}
 		if (isShapeTool(this.currentTool)) {
-			return "Shape thickness";
+			return "形状线条粗细";
 		}
-		return "Pen thickness";
+		return "笔的粗细";
 	}
 
 	private getWidthRange(tool: AnnotationTool = this.currentTool): { min: number; max: number; step: number } {
@@ -9152,6 +9283,7 @@ class NativePdfAnnotatorSession {
 	}
 	selectToolFromCommand(tool: AnnotationTool): void {
 		if (this.hasActivePdfPointerInteraction()) this.cancelActiveSessionInteraction();
+		if (!this.annotationMode) this.toggleAnnotationMode();
 		this.setActiveTool(tool);
 		this.applyOverlayMode();
 		this.refreshToolbar();
@@ -9163,7 +9295,7 @@ class NativePdfAnnotatorSession {
 		this.setActiveTool(kind);
 		this.applyOverlayMode();
 		this.refreshToolbar();
-		this.refreshStatus(`${kind === "highlighter" ? "Highlighter" : "Pen"}: ${mode === "freehand" ? "Freehand" : mode === "straight" ? "Straight line" : "Draw and hold"}`);
+		this.refreshStatus(`${kind === "highlighter" ? "荧光笔" : "笔"}：${mode === "freehand" ? "自由绘制" : mode === "straight" ? "直线" : mode === "region" ? "区域高亮" : "画完后按住"}`);
 	}
 
 	setInkToolLineStyle(kind: InkToolKind, lineStyle: ShapeLineStyle): void {
@@ -9174,7 +9306,13 @@ class NativePdfAnnotatorSession {
 
 	chooseToolPreset(kind: ToolPresetKind, index: number): void {
 		const preset = this.toolState.getPresetsByKind(kind)[index];
-		if (preset) this.applyPreset(preset.id);
+		if (!preset) return;
+		if (this.hasActivePdfPointerInteraction()) this.cancelActiveSessionInteraction();
+		if (!this.annotationMode) this.toggleAnnotationMode();
+		this.setActiveTool(kind);
+		this.applyPreset(preset.id);
+		this.applyOverlayMode();
+		this.refreshToolbar();
 	}
 
 	configureShapeTool(next: Partial<ShapeOptions>): void {
@@ -9198,14 +9336,14 @@ class NativePdfAnnotatorSession {
 	reshapeSelectedShapes(kind: "circle" | "square" | "equilateral" | "right"): void {
 		const ids = new Set(this.selectedTargets.filter(target => target.kind === "shape").map(target => target.id));
 		const shapes = this.annotationDocument?.shapes.filter(shape => ids.has(shape.id) && (kind === "circle" ? shape.tool === "ellipse" : kind === "square" ? shape.tool === "rectangle" : kind === "right" ? shape.tool === "triangle" || shape.tool === "line" : shape.tool === "triangle")) ?? [];
-		if (!shapes.length) { this.refreshStatus("Select a matching shape first."); return; }
+		if (!shapes.length) { this.refreshStatus("请先选中对应的形状。"); return; }
 		this.pushHistory();
 		for (const shape of shapes) {
 			const surface = this.pageSurfaces.get(shape.page);
 			const aspect = surface ? surface.lastHeight / Math.max(1, surface.lastWidth) : shape.aspectRatio ?? 1.414;
 			Object.assign(shape, constrainShape(shape, aspect, kind === "right" ? "right" : "regular"));
 		}
-		this.markDirtyAndRedraw("Reshaped selection");
+		this.markDirtyAndRedraw("已调整所选形状");
 	}
 
 	private openInkToolOptions(button: HTMLButtonElement, kind: InkToolKind): void {
@@ -9224,7 +9362,7 @@ class NativePdfAnnotatorSession {
 			const sizes = new Menu();
 			addMenuDescriptors(sizes, inkWaveSizeMenuItems(this.toolState.getInkToolOptions(kind).waveSize, waveSize => apply({ waveSize })));
 			this.showExclusiveMenuAtPosition(sizes, position);
-		}));
+		}, kind));
 		this.showExclusiveMenuAtPosition(menu, position);
 	}
 
@@ -9249,7 +9387,7 @@ class NativePdfAnnotatorSession {
 			this.applyOverlayMode(); this.refreshToolbar();
 		}, () => this.transientPopovers.close("shape"));
 		this.transientPopovers.open("shape", popover);
-		this.positionPopoverNearAnchor(popover, this.toolbarEl?.querySelector<HTMLElement>("[aria-label^='Shapes']") ?? button);
+		this.positionPopoverNearAnchor(popover, this.toolbarEl?.querySelector<HTMLElement>("[aria-label^='形状']") ?? button);
 	}
 
 	private toggleEraserMode(): void {
@@ -9258,12 +9396,12 @@ class NativePdfAnnotatorSession {
 		this.persistToolDefaults();
 		this.refreshToolbar();
 		this.refreshToolPreviewFromLastPointer(false);
-		this.refreshStatus(nextMode === "object" ? "Eraser mode: whole object" : "Eraser mode: touch section");
+		this.refreshStatus(nextMode === "object" ? "橡皮模式：整对象擦除" : "橡皮模式：触碰擦除");
 	}
 
 	private openEraserModeMenu(button: HTMLButtonElement): void {
 		const menu = new Menu();
-		addMenuDescriptors(menu, ([{ mode: "segment", title: "Touch erase" }, { mode: "object", title: "Object erase" }] as const).map(item => ({
+		addMenuDescriptors(menu, ([{ mode: "segment", title: "触碰擦除" }, { mode: "object", title: "整对象擦除" }] as const).map(item => ({
 			title: item.title, checked: this.eraserMode === item.mode,
 			run: () => { if (this.eraserMode !== item.mode) this.toggleEraserMode(); }
 		})));
@@ -9274,9 +9412,9 @@ class NativePdfAnnotatorSession {
 	private openSelectionMenu(button: HTMLButtonElement): void {
 		const menu = new Menu();
 		addMenuDescriptors(menu, ([
-			{ mode: "single", title: "Single select", status: "Selection mode: single" },
-			{ mode: "box", title: "Box select", status: "Selection mode: box" },
-			{ mode: "lasso", title: "Freehand lasso", status: "Selection mode: lasso" }
+			{ mode: "single", title: "单选", status: "选择模式：单选" },
+			{ mode: "box", title: "框选", status: "选择模式：框选" },
+			{ mode: "lasso", title: "自由套索", status: "选择模式：套索" }
 		] as const).map((definition) => ({
 			title: definition.title,
 			checked: this.toolState.selectionMode === definition.mode,
@@ -9293,34 +9431,34 @@ class NativePdfAnnotatorSession {
 		const menu = new Menu();
 		const hasAnnotationSelection = this.selectedTargets.length > 0;
 		const descriptors: MenuDescriptor[] = [
-			{ title: "Select all on page (Ctrl/Cmd+A)", icon: "list-plus", run: () => this.selectAllCurrentPageAnnotations() }
+			{ title: "选中本页全部（Ctrl/Cmd+A）", icon: "list-plus", run: () => this.selectAllCurrentPageAnnotations() }
 		];
 		if (hasAnnotationSelection) {
 			if (this.plugin.getOcrSettings?.().copyHandwritingAsText) descriptors.push(
-				{ title: "Copy handwriting", icon: "pen-line", run: () => this.copySelectedTargets(true) }
+				{ title: "复制手写", icon: "pen-line", run: () => this.copySelectedTargets(true) }
 			);
 			descriptors.push(
 				menuSeparator,
-				{ title: "Copy selection (Ctrl/Cmd+C)", icon: "copy", run: () => this.copySelectedTargets() },
-				{ title: "Cut selection (Ctrl/Cmd+X)", icon: "scissors", run: () => this.cutSelectedTargets() },
-				{ title: "Duplicate selection", icon: "copy", run: () => this.duplicateSelectedTargets() },
-				{ title: "Delete selection (Del)", icon: "trash", run: () => this.deleteSelectedTargets() },
+				{ title: "复制选区（Ctrl/Cmd+C）", icon: "copy", run: () => this.copySelectedTargets() },
+				{ title: "剪切选区（Ctrl/Cmd+X）", icon: "scissors", run: () => this.cutSelectedTargets() },
+				{ title: "复制造区", icon: "copy", run: () => this.duplicateSelectedTargets() },
+				{ title: "删除选区（Del）", icon: "trash", run: () => this.deleteSelectedTargets() },
 				menuSeparator,
-				{ title: "Bring to front (Ctrl/Cmd+])", icon: "bring-to-front", run: () => this.reorderSelectedTargets("front") },
-				{ title: "Send to back (Ctrl/Cmd+[)", icon: "send-to-back", run: () => this.reorderSelectedTargets("back") }
+				{ title: "置于顶层（Ctrl/Cmd+]）", icon: "bring-to-front", run: () => this.reorderSelectedTargets("front") },
+				{ title: "置于底层（Ctrl/Cmd+[）", icon: "send-to-back", run: () => this.reorderSelectedTargets("back") }
 			);
 			const selectedShapes = this.annotationDocument?.shapes.filter(shape => this.selectedTargets.some(target => target.kind === "shape" && target.id === shape.id)) ?? [];
 			if (selectedShapes.length) descriptors.push(menuSeparator);
-			if (selectedShapes.some(shape => shape.tool === "ellipse")) descriptors.push({ title: "Make circle", icon: "circle", run: () => this.reshapeSelectedShapes("circle") });
-			if (selectedShapes.some(shape => shape.tool === "rectangle")) descriptors.push({ title: "Make square", icon: "square", run: () => this.reshapeSelectedShapes("square") });
-			if (selectedShapes.some(shape => shape.tool === "triangle")) descriptors.push({ title: "Make equilateral triangle", icon: "triangle", run: () => this.reshapeSelectedShapes("equilateral") });
-			if (selectedShapes.some(shape => shape.tool === "triangle" || shape.tool === "line")) descriptors.push({ title: "Make right-angle triangle or line", icon: "triangle-right", run: () => this.reshapeSelectedShapes("right") });
+			if (selectedShapes.some(shape => shape.tool === "ellipse")) descriptors.push({ title: "变成圆", icon: "circle", run: () => this.reshapeSelectedShapes("circle") });
+			if (selectedShapes.some(shape => shape.tool === "rectangle")) descriptors.push({ title: "变成正方形", icon: "square", run: () => this.reshapeSelectedShapes("square") });
+			if (selectedShapes.some(shape => shape.tool === "triangle")) descriptors.push({ title: "变成等边三角形", icon: "triangle", run: () => this.reshapeSelectedShapes("equilateral") });
+			if (selectedShapes.some(shape => shape.tool === "triangle" || shape.tool === "line")) descriptors.push({ title: "变成直角三角形或直线", icon: "triangle-right", run: () => this.reshapeSelectedShapes("right") });
 		}
 		if (this.plugin.hasClipboard()) {
 			descriptors.push(
 				menuSeparator,
-				{ title: "Paste copied annotations (Ctrl/Cmd+V)", icon: "clipboard", run: () => this.pasteClipboard() },
-				{ title: "Paste copied annotation in place (Ctrl/Cmd+Shift+V)", icon: "clipboard-copy", run: () => this.pasteClipboard(true) }
+				{ title: "粘贴批注（Ctrl/Cmd+V）", icon: "clipboard", run: () => this.pasteClipboard() },
+				{ title: "原位粘贴批注（Ctrl/Cmd+Shift+V）", icon: "clipboard-copy", run: () => this.pasteClipboard(true) }
 			);
 		}
 		addMenuDescriptors(menu, descriptors);
@@ -9332,18 +9470,18 @@ class NativePdfAnnotatorSession {
 		const menu = new Menu();
 		const region = this.lastSelectionRegion;
 		if (!region) {
-			addMenuDescriptors(menu, [{ title: "No active region", icon: "info", disabled: true }]);
+			addMenuDescriptors(menu, [{ title: "没有活动区域", icon: "info", disabled: true }]);
 			const emptyRect = button.getBoundingClientRect();
 			this.showExclusiveMenuAtPosition(menu, { x: emptyRect.left, y: emptyRect.bottom + 6 });
 			return;
 		}
 		addMenuDescriptors(menu, [
-			{ title: "Copy region embed block", icon: "code", run: () => this.copySelectionAnnotatedEmbedBlock() },
-			{ title: "Copy region reference", icon: "link", run: () => this.copySelectionRegionReference() },
-			{ title: "Export region image", icon: "image-file", run: () => this.exportSelectionSnapshot() },
-			{ title: "Open source page", icon: "file-text", run: () => this.goToMixedPage(region.page) },
+			{ title: "复制区域嵌入块", icon: "code", run: () => this.copySelectionAnnotatedEmbedBlock() },
+			{ title: "复制区域引用", icon: "link", run: () => this.copySelectionRegionReference() },
+			{ title: "导出区域图片", icon: "image-file", run: () => this.exportSelectionSnapshot() },
+			{ title: "打开源页面", icon: "file-text", run: () => this.goToMixedPage(region.page) },
 			menuSeparator,
-			{ title: "Clear region", icon: "x", run: () => this.clearRegion() }
+			{ title: "清除区域", icon: "x", run: () => this.clearRegion() }
 		]);
 		const rect = button.getBoundingClientRect();
 		this.showExclusiveMenuAtPosition(menu, { x: rect.left, y: rect.bottom + 6 });
@@ -9402,15 +9540,49 @@ class NativePdfAnnotatorSession {
 	private toggleTabletTouchInputMode(): void {
 		const touchDrawing = this.getInkInputPolicy() !== "pen-mouse-only";
 		const nextPolicy: InkInputPolicy = touchDrawing ? "pen-mouse-only" : "allow-touch";
-		this.forceFinishStalePdfInteraction("Input mode changed");
+		this.forceFinishStalePdfInteraction("已切换输入模式");
 		void this.plugin.updateBehaviorSettings({ inkInputPolicy: nextPolicy });
 		this.refreshStatus(
 			nextPolicy === "allow-touch"
-				? "Finger draws; Apple Pencil and mouse also draw"
-				: "Finger pans; Apple Pencil and mouse draw",
+				? "手指绘制；Apple Pencil 和鼠标也能绘制"
+				: "手指平移；Apple Pencil 和鼠标绘制",
 			3000
 		);
 	}
+
+	private readonly handleSessionPaste = (event: ClipboardEvent): void => {
+		if (!this.annotationDocument || !this.annotationMode || !this.isLeafActive()) return;
+		if (this.file?.path !== this.getPdfFile()?.path || this.hasOpenTransientPopover()) return;
+		const target = event.target;
+		if (isHtmlElement(target) && (target.isContentEditable || target.closest("input, textarea, select, [contenteditable='true']"))) return;
+		const data = event.clipboardData;
+		if (!data) return;
+		const images: File[] = [];
+		for (const file of Array.from(data.files ?? [])) {
+			if (file.type.startsWith("image/")) images.push(file);
+		}
+		if (!images.length) {
+			for (const item of Array.from(data.items ?? [])) {
+				const file = item.kind === "file" && item.type.startsWith("image/") ? item.getAsFile() : null;
+				if (file) images.push(file);
+			}
+		}
+		if (!images.length) return;
+		event.preventDefault();
+		event.stopPropagation();
+		this.syncCurrentPageForPageAction();
+		const origin = this.getRecentPdfPastePoint(this.currentPage) ?? { x: 0.5, y: 0.5, pressure: 0.5 };
+		void (async () => {
+			for (let index = 0; index < images.length; index++) {
+				const offset = index * 0.03;
+				await this.insertPhotoFileOnCurrentPage(images[index], {
+					x: Math.min(0.9, origin.x + offset),
+					y: Math.min(0.9, origin.y + offset),
+					pressure: origin.pressure
+				});
+			}
+		})();
+	};
 
 	private readonly handleSessionKeyDown = (event: KeyboardEvent): void => {
 		if (this.shapeGestureOptions && ["Shift", "Alt", "Control", "Meta"].includes(event.key)) { this.updateShapeModifiers(event); return; }
@@ -10069,7 +10241,7 @@ class NativePdfAnnotatorSession {
 		}
 		const surface = this.ensureSurfaceAtClientPoint(event.clientX, event.clientY);
 		if (!surface) {
-			this.refreshStatus(`Could not start ink: no page surface at pointer (${this.pageSurfaces.size} registered)`, 4000);
+			this.refreshStatus(`无法开始书写：指针位置没有页面画布（已注册 ${this.pageSurfaces.size} 个）`, 4000);
 			this.scheduleSyncPages();
 			return;
 		}
@@ -10177,7 +10349,7 @@ class NativePdfAnnotatorSession {
 		}
 		const canvas = isHtmlCanvasElement(event.currentTarget) ? event.currentTarget : null;
 		if (!canvas) {
-			this.refreshStatus("Could not start ink: pointer target is not the annotator canvas", 4000);
+			this.refreshStatus("无法开始书写：指针目标不是批注画布", 4000);
 			return;
 		}
 		this.handlePointerDownForCanvas(event, canvas);
@@ -10186,28 +10358,28 @@ class NativePdfAnnotatorSession {
 	private handlePointerDownForCanvas(event: PointerEvent, canvas: HTMLCanvasElement, forceWebKitStylus = false): void {
 		this.selectionBackground = null;
 		if (!this.annotationMode) {
-			this.refreshStatus("Could not start ink: annotation mode is off", 4000);
+			this.refreshStatus("无法开始书写：批注模式未开启", 4000);
 			return;
 		}
 		if (!this.annotationDocument) {
-			this.refreshStatus("Could not start ink: annotation document is not loaded yet", 4000);
+			this.refreshStatus("无法开始书写：批注文档还没加载完", 4000);
 			return;
 		}
 
 		const pageNumber = Number(canvas.dataset.pageNumber);
 		if (!Number.isFinite(pageNumber) || pageNumber <= 0) {
-			this.refreshStatus("Could not start ink: page number is missing from the overlay", 4000);
+			this.refreshStatus("无法开始书写：批注层缺少页码", 4000);
 			this.scheduleSyncPages();
 			return;
 		}
 		const surface = this.pageSurfaces.get(pageNumber);
 		if (!surface) {
-			this.refreshStatus(`Could not start ink: page ${pageNumber} surface is not ready`, 4000);
+			this.refreshStatus(`无法开始书写：第 ${pageNumber} 页的画布还没准备好`, 4000);
 			this.scheduleSyncPages();
 			return;
 		}
 		canvas.setCssStyles({ touchAction: this.getOverlayTouchAction() });
-		if (!forceWebKitStylus && shouldIgnoreInkPointerEvent(event, this.currentTool, this.getInkInputPolicy())) {
+		if (!forceWebKitStylus && !this.crossPageHandoffActive && shouldIgnoreInkPointerEvent(event, this.currentTool, this.getInkInputPolicy())) {
 			return;
 		}
 		event.preventDefault();
@@ -10217,7 +10389,7 @@ class NativePdfAnnotatorSession {
 			canvas.setCssStyles({ touchAction: "none" });
 			this.pauseCommittedRenderingForInkInput();
 		}
-		this.forceFinishStalePdfInteraction("New stroke recovered previous input");
+		this.forceFinishStalePdfInteraction("新笔画已恢复上一次输入");
 		this.webKitStylusPointerId = forceWebKitStylus ? event.pointerId : null;
 
 		this.currentPage = pageNumber;
@@ -10254,7 +10426,7 @@ class NativePdfAnnotatorSession {
 				this.activeResizeHandle = handle;
 				this.pointerPage = pageNumber;
 				this.setOverlayCursor(surface, this.getCursorForHandle(handle));
-				this.refreshStatus("Resize handle selected");
+				this.refreshStatus("已选中缩放手柄");
 				return;
 			}
 			const selectedHit = this.getSelectedTargetHit(pageNumber, point)
@@ -10267,7 +10439,7 @@ class NativePdfAnnotatorSession {
 				this.pointerPage = pageNumber;
 				this.setOverlayCursor(surface, "grabbing");
 				this.selectedTarget = selectedHit;
-				this.refreshStatus(this.selectedTargets.length > 1 ? `Moving ${this.selectedTargets.length} selections` : "Moving selection");
+				this.refreshStatus(this.selectedTargets.length > 1 ? `正在移动 ${this.selectedTargets.length} 项所选内容` : "正在移动所选内容");
 				return;
 			}
 			if (this.toolState.selectionMode === "box") {
@@ -10278,7 +10450,7 @@ class NativePdfAnnotatorSession {
 				this.activeResizeHandle = null;
 				this.pointerPage = pageNumber;
 				this.drawPageAnnotations(pageNumber);
-				this.refreshStatus("Drag box select");
+				this.refreshStatus("拖动进行框选");
 				return;
 			}
 			if (this.toolState.selectionMode === "lasso") {
@@ -10287,7 +10459,7 @@ class NativePdfAnnotatorSession {
 				this.dragAnchor = null;
 				this.pointerPage = pageNumber;
 				this.drawPageAnnotations(pageNumber);
-				this.refreshStatus("Tracing lasso");
+				this.refreshStatus("正在绘制套索");
 				return;
 			}
 			const hit = this.findSelectableTarget(pageNumber, point);
@@ -10297,7 +10469,7 @@ class NativePdfAnnotatorSession {
 				this.dragAnchor = null;
 				this.activeResizeHandle = null;
 				this.drawPageAnnotations(pageNumber);
-				this.refreshStatus("Nothing selected");
+				this.refreshStatus("未选中任何内容");
 				return;
 			}
 			this.pushHistory();
@@ -10319,7 +10491,7 @@ class NativePdfAnnotatorSession {
 			this.pointerPage = pageNumber;
 			this.setOverlayCursor(surface, "grabbing");
 			this.drawPageAnnotations(pageNumber);
-			this.refreshStatus(this.selectedTargets.length > 1 ? `Selected ${this.selectedTargets.length} objects` : `Selected ${hit.kind}`);
+			this.refreshStatus(this.selectedTargets.length > 1 ? `已选中 ${this.selectedTargets.length} 个对象` : `已选中${({ stroke: "笔画", text: "文字", shape: "形状", image: "图片" } as Record<string, string>)[String(hit.kind)] ?? hit.kind}`);
 			return;
 		}
 
@@ -10331,7 +10503,7 @@ class NativePdfAnnotatorSession {
 			this.activeResizeHandle = null;
 			this.pointerPage = pageNumber;
 			this.drawPageAnnotations(pageNumber);
-			this.refreshStatus("Drag region crop box");
+			this.refreshStatus("拖动区域裁剪框");
 			return;
 		}
 
@@ -10362,7 +10534,7 @@ class NativePdfAnnotatorSession {
 			this.dragMoved = false;
 			this.pointerPage = pageNumber;
 			this.drawPageAnnotations(pageNumber);
-			this.refreshStatus("Drag to draw a text box, release to type");
+			this.refreshStatus("拖动画出文本框，松开后即可输入");
 			return;
 		}
 
@@ -10379,7 +10551,7 @@ class NativePdfAnnotatorSession {
 				this.retainTouchErasePixels(pageNumber);
 				this.eraseCommittedLayerAtPoint(surface, point);
 			}
-			this.refreshStatus(`Erasing (${this.eraserMode})`);
+			this.refreshStatus(`正在擦除（${this.eraserMode}）`);
 			return;
 		}
 
@@ -10408,8 +10580,8 @@ class NativePdfAnnotatorSession {
 		this.currentStrokeRenderedPointCount = 0;
 		this.pointerPage = pageNumber;
 		this.drawTransientPageAnnotations(pageNumber);
-		this.showDrawingNotice(`New stroke on page ${pageNumber}`, 900);
-		this.refreshStatus(`Stroke started: ${this.currentTool}, page ${pageNumber}, points 1`, 900);
+		this.showDrawingNotice(`第 ${pageNumber} 页的新笔画`, 900);
+		this.refreshStatus(`已开始笔画：${this.currentTool}，第 ${pageNumber} 页，1 个点`, 900);
 	}
 
 	private clearShapeGesture(): void {
@@ -10447,7 +10619,7 @@ class NativePdfAnnotatorSession {
 		this.assistedShapeSource = source; this.shapeGestureOptions = options; this.pointerPage = surface.pageNumber;
 		const shapeFrom = (fit: ReturnType<typeof fitGesture>): ShapeAnnotation | null => fit ? {
 			id: source.id, page: source.page, tool: fit.tool, color: source.color, width: source.width, widthScale: source.widthScale,
-			opacity: source.opacity, appearance: source.tool, start: fit.start, end: fit.end, vertices: fit.vertices,
+			opacity: source.opacity, appearance: source.tool, start: fit.start, end: fit.end, vertices: fit.vertices, ...(options.filled ? { filled: true } : {}),
 			aspectRatio: surface.lastHeight / Math.max(1, surface.lastWidth), lineStyle: fit.tool === "line" && options.shape === "line" ? options.lineStyle : "solid", waveSize: options.waveSize,
 			zIndex: source.zIndex, createdAt: source.createdAt } : null;
 		if (options.method === "drag") {
@@ -10462,7 +10634,7 @@ class NativePdfAnnotatorSession {
 				this.shapeUnconstrainedPreview = shapeFrom(fit);
 				this.currentShape = this.constrainShapePreview(this.shapeUnconstrainedPreview); this.currentStroke = fit ? null : source;
 				this.drawTransientPageAnnotations(source.page);
-				this.refreshStatus(fit ? `Fitted ${fit.tool}. Release to keep; move to continue drawing.` : "Kept freehand: no clear shape found.");
+				this.refreshStatus(fit ? `已拟合为${fit.tool}。松开即保留；继续移动可接着画。` : "已保留手绘：没有识别出明确的形状。");
 				return !!fit;
 			}, () => { this.shapeUnconstrainedPreview = null; this.currentShape = null; this.currentStroke = source; this.scheduleInteractionRedraw(source.page); });
 		}
@@ -10517,7 +10689,7 @@ class NativePdfAnnotatorSession {
 		this.clearShapeGesture();
 		this.invalidateAnnotationPageCache(source.page); this.documentRevision++; this.isDirty = true; this.scheduleSave();
 		this.deferCommittedPageRedraw(source.page); this.scheduleMotionPreviewPreparation();
-		this.refreshStatus(shape ? "Shape saved" : "Freehand saved");
+		this.refreshStatus(shape ? "已保存形状" : "已保存手绘笔迹");
 		if (canvas) canvas.setCssStyles({ touchAction: this.getOverlayTouchAction() });
 	}
 
@@ -10579,8 +10751,8 @@ class NativePdfAnnotatorSession {
 			this.isDirty = true;
 			this.scheduleSave();
 			this.retainCommittedPagePixels(pageNumber);
-			this.showDrawingNotice(`Stroke recorded (${pointCount} points, ${strokeCount} total)`, 1400);
-			this.refreshStatus(`${message} (${pointCount} points, ${strokeCount} strokes)`);
+			this.showDrawingNotice(`已记录笔画（${pointCount} 个点，共 ${strokeCount} 笔）`, 1400);
+			this.refreshStatus(`${message}（${pointCount} 个点，共 ${strokeCount} 笔）`);
 			return;
 		}
 		if (this.currentShape && this.annotationDocument) {
@@ -10645,8 +10817,8 @@ class NativePdfAnnotatorSession {
 			this.isDirty = true;
 			this.scheduleSave();
 			this.retainCommittedPagePixels(pageNumber);
-			this.showDrawingNotice(`Stroke recorded before layout refresh (${pointCount} points, ${strokeCount} total)`, 1600);
-			this.refreshStatus(`Stroke recorded before layout refresh (${pointCount} points, ${strokeCount} strokes)`, 1200);
+			this.showDrawingNotice(`刷新布局前已记录笔画（${pointCount} 个点，共 ${strokeCount} 笔）`, 1600);
+			this.refreshStatus(`刷新布局前已记录笔画（${pointCount} 个点，共 ${strokeCount} 笔）`, 1200);
 			return;
 		}
 		if (this.currentShape) {
@@ -10702,8 +10874,61 @@ class NativePdfAnnotatorSession {
 		}
 		event.preventDefault();
 		event.stopImmediatePropagation();
-		this.handlePointerMoveForCanvas(event, this.activePdfPointerCanvas);
+		this.tryCrossPageHandoff(event);
+		if (this.activePdfPointerCanvas) this.handlePointerMoveForCanvas(event, this.activePdfPointerCanvas);
 	};
+
+	private crossPageHandoffActive = false;
+	private crossPageGroup: { base: number; baseline: AnnotationDocument } | null = null;
+
+	/**
+	 * Freehand ink and region highlights can cross into the next/previous page: the stroke is
+	 * committed on the page it started on and continues as a new piece on the page under the pointer.
+	 * All pieces share one undo step.
+	 */
+	private tryCrossPageHandoff(event: PointerEvent): void {
+		const document = this.annotationDocument;
+		const oldCanvas = this.activePdfPointerCanvas;
+		const oldPage = this.pointerPage;
+		if (!document || !oldCanvas || oldPage === null) return;
+		const freehand = !!this.currentStroke && !this.shapeGestureOptions;
+		const region = !!this.shapeGestureOptions?.filled && !!this.currentShape;
+		if (!freehand && !region) return;
+		let target: PageSurface | null = null;
+		for (const surface of this.pageSurfaces.values()) {
+			if (surface.pageNumber === oldPage || !surface.overlayEl.isConnected) continue;
+			const rect = surface.overlayEl.getBoundingClientRect();
+			if (event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom) { target = surface; break; }
+		}
+		if (!target) return;
+		const goingDown = target.pageNumber > oldPage;
+		const previousStart = this.currentShape?.start ?? null;
+		const lastPoint = this.currentStroke?.points[this.currentStroke.points.length - 1] ?? null;
+		if (!this.crossPageGroup) this.crossPageGroup = { base: this.undoStack.length, baseline: cloneDocument(document) };
+		this.handlePointerUpForCanvas(event, oldCanvas);
+		// The continuing move event has button -1; skip the pointer-down button check for this synthetic restart.
+		this.crossPageHandoffActive = true;
+		try { this.handlePointerDownForCanvas(event, target.overlayEl); } finally { this.crossPageHandoffActive = false; }
+		const edgeY = goingDown ? 0 : 1;
+		if (this.currentStroke && lastPoint) {
+			const first = this.currentStroke.points[0];
+			if (first) this.currentStroke.points.unshift({ ...first, x: first.x, y: edgeY });
+		} else if (this.shapeUnconstrainedPreview && previousStart) {
+			this.shapeUnconstrainedPreview.start = { ...this.shapeUnconstrainedPreview.start, x: previousStart.x, y: edgeY };
+			this.currentShape = this.constrainShapePreview(this.shapeUnconstrainedPreview);
+		}
+	}
+
+	private finishCrossPageGroup(): void {
+		const group = this.crossPageGroup;
+		this.crossPageGroup = null;
+		if (!group) return;
+		// Collapse every piece of the gesture into a single undo step.
+		this.undoStack.length = Math.min(group.base, this.undoStack.length);
+		this.undoStack.push({ kind: "document", document: group.baseline });
+		if (this.undoStack.length > MAX_HISTORY) this.undoStack.shift();
+		this.redoStack = [];
+	}
 
 	private readonly handleDocumentPointerUp = (event: PointerEvent): void => {
 		if (!this.shouldHandleDocumentPointer(event) || !this.activePdfPointerCanvas) {
@@ -10713,6 +10938,7 @@ class NativePdfAnnotatorSession {
 		event.preventDefault();
 		event.stopImmediatePropagation();
 		this.handlePointerUpForCanvas(event, canvas);
+		this.finishCrossPageGroup();
 	};
 
 	private readonly handleDocumentPointerCancel = (event: PointerEvent): void => {
@@ -10723,6 +10949,7 @@ class NativePdfAnnotatorSession {
 		event.preventDefault();
 		event.stopImmediatePropagation();
 		this.handlePointerCancelForCanvas(event, canvas);
+		this.finishCrossPageGroup();
 	};
 
 	private readonly handlePointerMove = (event: PointerEvent): void => {
@@ -10966,10 +11193,10 @@ class NativePdfAnnotatorSession {
 			this.lastSelectionRegion = regionRect ? { page: pageNumber, rect: regionRect } : null;
 			this.drawAllAnnotations();
 			if (this.lastSelectionRegion && this.plugin.shouldAutoCopyRegionEmbed()) {
-				this.refreshStatus("Region captured. Copying embed...");
+				this.refreshStatus("已截取区域，正在复制嵌入…");
 				void this.copySelectionAnnotatedEmbedBlock();
 			} else {
-				this.refreshStatus(this.lastSelectionRegion ? "Region captured. Use Copy embed." : "Region too small");
+				this.refreshStatus(this.lastSelectionRegion ? "已截取区域，请点「复制嵌入」。" : "区域太小");
 			}
 			this.refreshToolbar();
 			this.refreshToolPreviewFromLastPointer(false);
@@ -10985,7 +11212,7 @@ class NativePdfAnnotatorSession {
 					canvas.setCssStyles({ cursor: "text" });
 				}
 				if (this.dragMoved) {
-					this.markDirtyAndRedraw("Text box updated");
+					this.markDirtyAndRedraw("已更新文本框");
 				} else {
 					if (this.undoStack.length > 0) {
 						this.undoStack.pop();
@@ -11048,9 +11275,9 @@ class NativePdfAnnotatorSession {
 				this.dragAnchor = null;
 				this.dragMoved = false;
 				this.drawAllAnnotations();
-				const selectionVerb = this.toolState.selectionMode === "box" ? "Box selected" : "Lasso selected";
-				const emptyMessage = this.toolState.selectionMode === "box" ? "Box found nothing" : "Lasso found nothing";
-				this.refreshStatus(this.selectedTargets.length > 0 ? `${selectionVerb} ${this.selectedTargets.length} objects` : emptyMessage);
+				const selectionVerb = this.toolState.selectionMode === "box" ? "已框选" : "已套索选中";
+				const emptyMessage = this.toolState.selectionMode === "box" ? "框选范围内没有内容" : "套索范围内没有内容";
+				this.refreshStatus(this.selectedTargets.length > 0 ? `${selectionVerb} ${this.selectedTargets.length} 个对象` : emptyMessage);
 				this.refreshToolbar();
 				this.refreshToolPreviewFromLastPointer(false);
 				return;
@@ -11060,12 +11287,12 @@ class NativePdfAnnotatorSession {
 			this.activeResizeHandle = null;
 			this.updateOverlayCursorForPointer(event);
 			if (this.dragMoved) {
-				this.markDirtyAndRedraw("Selection updated");
+				this.markDirtyAndRedraw("已更新选择");
 			} else {
 				if (this.undoStack.length > 0) {
 					this.undoStack.pop();
 				}
-				this.refreshStatus("Selection ready");
+				this.refreshStatus("选择已就绪");
 				this.drawAllAnnotations();
 			}
 			this.dragMoved = false;
@@ -11090,12 +11317,12 @@ class NativePdfAnnotatorSession {
 				if (!segmentErase) {
 					this.retainCommittedPagePixels(pageNumber);
 				}
-				this.refreshStatus(`Erased (${this.eraserMode})`);
+				this.refreshStatus(`已擦除（${this.eraserMode}）`);
 			} else {
 				if (this.undoStack.length > 0) {
 					this.undoStack.pop();
 				}
-				this.refreshStatus("Eraser ready");
+				this.refreshStatus("橡皮已就绪");
 			}
 			this.refreshToolPreviewFromLastPointer(false);
 			return;
@@ -11112,13 +11339,13 @@ class NativePdfAnnotatorSession {
 			this.annotationDocument.shapes.push(this.currentShape);
 		} else if (this.currentStroke && this.currentStroke.points.length > 0) {
 			const pointCount = this.currentStroke.points.length;
-			if (this.plugin.shouldShowDrawingNotices()) this.refreshStatus(`Saving stroke: ${pointCount} points`, 3000);
+			if (this.plugin.shouldShowDrawingNotices()) this.refreshStatus(`正在保存笔画：${pointCount} 个点`, 3000);
 			this.pushStrokeAddHistory(this.currentStroke);
 			this.annotationDocument.strokes.push(this.currentStroke);
 			this.renderTelemetry.recordStrokeCommit(pointCount, this.annotationDocument.strokes.length);
-			this.showDrawingNotice(`Stroke recorded (${pointCount} points, ${this.annotationDocument.strokes.length} total)`, 1400);
-			if (this.plugin.shouldShowDrawingNotices()) this.refreshStatus(`Stroke recorded (${pointCount} points, ${this.annotationDocument.strokes.length} strokes)`, 900);
-			else this.refreshStatus("Saving annotations", 900);
+			this.showDrawingNotice(`已记录笔画（${pointCount} 个点，共 ${this.annotationDocument.strokes.length} 笔）`, 1400);
+			if (this.plugin.shouldShowDrawingNotices()) this.refreshStatus(`已记录笔画（${pointCount} 个点，共 ${this.annotationDocument.strokes.length} 笔）`, 900);
+			else this.refreshStatus("正在保存批注", 900);
 		}
 		this.invalidateAnnotationPageCache(pageNumber);
 		this.documentRevision += 1;
@@ -11139,7 +11366,7 @@ class NativePdfAnnotatorSession {
 		} else {
 			this.deferCommittedPageRedraw(pageNumber);
 		}
-		this.refreshStatus(isShapeTool(this.currentTool) ? "Shape saved" : "Stroke saved");
+		this.refreshStatus(isShapeTool(this.currentTool) ? "已保存形状" : "已保存笔迹");
 	}
 
 	private readonly handlePointerCancel = (event: PointerEvent): void => {
@@ -11194,9 +11421,21 @@ class NativePdfAnnotatorSession {
 		return this.getNormalizedPointFromRect(rect, event);
 	}
 
+	private mouseInkSmoother: PointerPathSmoother | null = null;
+
 	private getNormalizedPointFromRect(rect: DOMRect, event: PointerEvent): AnnotationPoint {
 		const width = rect.width || 1;
 		const height = rect.height || 1;
+		// Mouse/trackpad: smooth the path with a One Euro filter (the endpoint stays exact).
+		let clientX = event.clientX, clientY = event.clientY;
+		const smoothing = this.plugin.getInkRenderSettings().mouseSmoothing ?? 0.5;
+		if (event.pointerType === "mouse" && smoothing > 0 && (this.currentTool === "pen" || this.currentTool === "highlighter") && (this.currentStroke || event.type === "pointerdown")) {
+			if (event.type === "pointerdown" || !this.mouseInkSmoother) this.mouseInkSmoother = new PointerPathSmoother(smoothing);
+			const smoothed = this.mouseInkSmoother.filter(event.clientX, event.clientY, event.timeStamp || performance.now());
+			if (event.type !== "pointerup") { clientX = smoothed.x; clientY = smoothed.y; }
+		} else if (!this.currentStroke) {
+			this.mouseInkSmoother = null;
+		}
 		const pressure = resolvePointerPressure(
 			event,
 			this.lastPdfPoint,
@@ -11206,8 +11445,8 @@ class NativePdfAnnotatorSession {
 			this.currentStroke?.points[this.currentStroke.points.length - 1]?.pressure ?? this.assistedShapeSource?.points[this.assistedShapeSource.points.length - 1]?.pressure
 		);
 		const point = {
-			x: clamp((event.clientX - rect.left) / width, 0, 1),
-			y: clamp((event.clientY - rect.top) / height, 0, 1),
+			x: clamp((clientX - rect.left) / width, 0, 1),
+			y: clamp((clientY - rect.top) / height, 0, 1),
 			pressure,
 			t: event.timeStamp || performance.now()
 		};
@@ -13316,11 +13555,11 @@ class NativePdfAnnotatorSession {
 			const report = {
 				pageNumber,
 				surfaces: this.pageSurfaces.size,
-				error: "No page surface is registered"
+				error: "没有已注册的页面画布"
 			};
 			await writeClipboardText(JSON.stringify(report, null, 2));
-			this.refreshStatus("Overlay diagnostic copied: no page surface", 8000);
-			new Notice("Freedraw PDF diagnostic copied to clipboard.");
+			this.refreshStatus("已复制批注层诊断信息：没有页面画布", 8000);
+			new Notice("手绘 PDF 诊断信息已复制到剪贴板。");
 			return;
 		}
 
@@ -13382,8 +13621,8 @@ class NativePdfAnnotatorSession {
 			topStack: stack
 		};
 		await writeClipboardText(JSON.stringify(report, null, 2));
-		this.refreshStatus(`Overlay diagnostic copied: p${surface.pageNumber}, alpha ${alphaPixels}`, 10000);
-		new Notice("Freedraw PDF diagnostic copied to clipboard.");
+		this.refreshStatus(`已复制批注层诊断信息：第 ${surface.pageNumber} 页，alpha ${alphaPixels}`, 10000);
+		new Notice("手绘 PDF 诊断信息已复制到剪贴板。");
 	}
 
 	private roundRectForDiagnostic(rect: DOMRect): { left: number; top: number; width: number; height: number; right: number; bottom: number } {
@@ -13417,7 +13656,7 @@ class NativePdfAnnotatorSession {
 	}
 
 	private refreshSaveState(phase: "pending" | "saving" | "saved" | "failed", error?:string): void {
-		const labels = {pending:"Unsaved changes",saving:"Saving locallyâ€¦",saved:"Saved locally",failed:"NOT SAVED"};
+		const labels = {pending:"有未保存的更改",saving:"正在本地保存…",saved:"已保存到本地",failed:"未保存"};
 		if (this.plugin.shouldShowDrawingNotices() || phase === "failed") this.refreshStatus(error || labels[phase], phase === "failed" ? 0 : 1500);
 		if (this.file && typeof CustomEvent !== "undefined") this.ownerDocument.dispatchEvent(new CustomEvent("freedraw-pdf-save-state",{
 			detail:{path:this.store.getSidecarPath(this.file),phase,error}
@@ -13441,7 +13680,10 @@ export default class PDFAnnotatorPlugin extends Plugin {
 	private clipboard: AnnotationClipboardPayload | null = null;
 	private clipboardRevision = 0;
 
+	private disposeZoomDock: (() => void) | null = null;
+
 	async onload(): Promise<void> {
+		this.disposeZoomDock = installZoomDock(this.app, (id) => this.registerInterval(id));
 		this.settingsController = new PDFAnnotatorSettingsController(
 			() => this.loadData(),
 			(data) => this.saveData(data),
@@ -13465,20 +13707,20 @@ export default class PDFAnnotatorPlugin extends Plugin {
 		this.registerMarkdownCodeBlockProcessor("freedraw-pdf", (source, el, context) => {
 			void this.annotatedEmbeds.renderMarkdownBlock(source, el, context.sourcePath);
 		});
-		this.addRibbonIcon("pen-tool", "Toggle annotation mode on active PDF", async () => {
+		this.addRibbonIcon("pen-tool", "切换当前 PDF 的批注模式", async () => {
 			const session = await this.ensureActivePdfSession();
 			if (!session) {
-				new Notice("Open a PDF in Obsidian's built-in viewer first.");
+				new Notice("请先用 Obsidian 内置查看器打开一个 PDF。");
 				return;
 			}
 			session.toggleAnnotationMode();
 		});
-		this.addRibbonIcon("file-plus-2", "Create blank annotatable PDF", () => {
+		this.addRibbonIcon("file-plus-2", "新建可批注的空白 PDF", () => {
 			this.openBlankAnnotatablePdfModal();
 		});
 		this.addCommand({
 			id: "toggle-active-pdf-annotation-mode",
-			name: "Toggle annotation mode on active PDF",
+			name: "切换当前 PDF 的批注模式",
 			checkCallback: (checking: boolean) => {
 				const canRun = !!this.getActivePdfLeaf();
 				if (canRun && !checking) {
@@ -13490,7 +13732,7 @@ export default class PDFAnnotatorPlugin extends Plugin {
 
 		this.addCommand({
 			id: "create-blank-annotatable-pdf",
-			name: "Create blank annotatable PDF",
+			name: "新建可批注的空白 PDF",
 			callback: () => {
 				this.openBlankAnnotatablePdfModal();
 			}
@@ -13500,19 +13742,19 @@ export default class PDFAnnotatorPlugin extends Plugin {
 			(command) => this.addCommand(command),
 			() => this.getSessionForLeaf(this.getActivePdfLeaf()),
 			[
-				{ id: "copy-current-page-pdf-link", name: "Copy current PDF page link", run: (session) => session.copyCurrentPageLink() },
-				{ id: "open-active-pdf-annotation-json", name: "Open active PDF annotation data JSON", run: (session) => session.openAnnotationDataJson() },
-				{ id: "export-current-page-snapshot", name: "Export current annotated page as PNG", run: (session) => session.exportCurrentPageSnapshot() },
-				{ id: "export-annotated-mixed-pdf", name: "Export annotated mixed PDF", run: (session) => session.exportAnnotatedMixedDocumentPdf() },
-				{ id: "create-native-mixed-working-pdf", name: "Advanced: create native mixed working PDF", run: (session) => session.materializeNativeMixedWorkingPdf() },
-				{ id: "insert-native-notebook-page-after-current", name: "Add temporary template page after current PDF page", run: (session) => session.openTemplatePageInsertModal("after") },
-				{ id: "insert-native-notebook-page-before-current", name: "Add temporary template page before current PDF page", run: (session) => session.openTemplatePageInsertModal("before") }
+				{ id: "copy-current-page-pdf-link", name: "复制当前 PDF 页链接", run: (session) => session.copyCurrentPageLink() },
+				{ id: "open-active-pdf-annotation-json", name: "打开当前 PDF 的批注数据 JSON", run: (session) => session.openAnnotationDataJson() },
+				{ id: "export-current-page-snapshot", name: "把当前批注页导出为 PNG", run: (session) => session.exportCurrentPageSnapshot() },
+				{ id: "export-annotated-mixed-pdf", name: "导出带批注的混合 PDF", run: (session) => session.exportAnnotatedMixedDocumentPdf() },
+				{ id: "create-native-mixed-working-pdf", name: "高级：生成原生混合工作 PDF", run: (session) => session.materializeNativeMixedWorkingPdf() },
+				{ id: "insert-native-notebook-page-after-current", name: "在当前页后添加临时模板页", run: (session) => session.openTemplatePageInsertModal("after") },
+				{ id: "insert-native-notebook-page-before-current", name: "在当前页前添加临时模板页", run: (session) => session.openTemplatePageInsertModal("before") }
 			]
 		);
 
 		this.addCommand({
 			id: "copy-current-page-annotated-embed",
-			name: "Copy annotated PDF page embed",
+			name: "复制带批注的 PDF 页嵌入",
 			checkCallback: (checking: boolean) => {
 				const source = this.getPreferredPdfInsertionSource();
 				const canRun = !!source;
@@ -13525,7 +13767,7 @@ export default class PDFAnnotatorPlugin extends Plugin {
 
 		this.addCommand({
 			id: "insert-current-page-annotated-embed",
-			name: "Insert annotated PDF page embed",
+			name: "插入带批注的 PDF 页嵌入",
 			checkCallback: (checking: boolean) => {
 				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				const source = this.getPreferredPdfInsertionSource();
@@ -13539,7 +13781,7 @@ export default class PDFAnnotatorPlugin extends Plugin {
 
 		this.addCommand({
 			id: "insert-selected-region-annotated-embed",
-			name: "Insert annotated PDF selected region embed",
+			name: "插入选中区域的批注嵌入",
 			checkCallback: (checking: boolean) => {
 				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				const source = this.getPreferredPdfRegionInsertionSource();
@@ -13555,32 +13797,32 @@ export default class PDFAnnotatorPlugin extends Plugin {
 			(command) => this.addCommand(command),
 			() => this.getSessionForLeaf(this.getActivePdfLeaf()),
 			[
-				{ id: "pdf-previous-mixed-page", name: "PDF: Go to previous page", isEnabled: (session) => session.canNavigatePage(-1), run: (session) => session.goToPreviousPage() },
-				{ id: "pdf-next-mixed-page", name: "PDF: Go to next page", isEnabled: (session) => session.canNavigatePage(1), run: (session) => session.goToNextPage() },
-				{ id: "pdf-undo-annotation-change", name: "PDF: Undo annotation change", run: (session) => session.undo() },
-				{ id: "pdf-redo-annotation-change", name: "PDF: Redo annotation change", run: (session) => session.redo() },
-				{ id: "pdf-open-mixed-page-list", name: "PDF: Open mixed page list", run: (session) => session.openMixedPageList() },
-				{ id: "pdf-open-go-to-page", name: "PDF: Go to page...", run: (session) => session.openGoToPage() },
-				{ id: "pdf-add-template-page-end", name: "PDF: Quick add template page to end", run: (session) => session.addTemplatePageToEnd() },
-				{ id: "pdf-add-template-page-before", name: "PDF: Quick add template page before current page", run: (session) => session.addTemplatePageBeforeCurrent() },
-				{ id: "pdf-add-template-page-after", name: "PDF: Quick add template page after current page", run: (session) => session.addTemplatePageAfterCurrent() },
-				{ id: "pdf-duplicate-current-added-page", name: "PDF: Duplicate current added page", isEnabled: (session) => session.hasCurrentAddedPage(), run: (session) => session.duplicateCurrentAddedPage() },
-				{ id: "pdf-duplicate-current-added-page-structure", name: "PDF: Duplicate current added page structure only", isEnabled: (session) => session.hasCurrentAddedPage(), run: (session) => session.duplicateCurrentAddedPage(false) },
-				{ id: "pdf-clear-current-added-page", name: "PDF: Clear current added page contents", isEnabled: (session) => session.hasCurrentAddedPage(), run: (session) => session.clearCurrentAddedPageContents() },
-				{ id: "pdf-delete-current-added-page", name: "PDF: Move current page to Removed", run: (session) => session.deleteCurrentPage() },
-				{ id: "select-all-page-annotations", name: "Select all annotations on current PDF page", run: (session) => session.selectAllCurrentPageAnnotations() },
-				{ id: "duplicate-selected-annotations", name: "Duplicate selected annotations", run: (session) => session.duplicateSelectedTargets() },
-				{ id: "delete-selected-annotations", name: "Delete selected annotations", run: (session) => session.deleteSelectedTargets() },
-				{ id: "copy-selected-annotations", name: "Copy selected annotations", run: (session) => session.copySelectedTargets() },
-				{ id: "cut-selected-annotations", name: "Cut selected annotations", run: (session) => session.cutSelectedTargets() },
-				{ id: "bring-selected-annotations-to-front", name: "Bring selected annotations to front", run: (session) => session.reorderSelectedTargets("front") },
-				{ id: "send-selected-annotations-to-back", name: "Send selected annotations to back", run: (session) => session.reorderSelectedTargets("back") },
-				{ id: "paste-selected-annotations", name: "Paste copied annotations", isEnabled: () => this.hasClipboard(), run: (session) => session.pasteClipboard() },
-				{ id: "paste-selected-annotations-in-place", name: "Paste copied annotations in place", isEnabled: () => this.hasClipboard(), run: (session) => session.pasteClipboard(true) },
-				{ id: "export-selection-snapshot", name: "Export selection snapshot", run: (session) => session.exportSelectionSnapshot() },
-				{ id: "copy-selection-region-reference", name: "Copy selection region reference", run: (session) => session.copySelectionRegionReference() },
-				{ id: "copy-selection-annotated-embed", name: "Copy selected region annotated embed", run: (session) => session.copySelectionAnnotatedEmbedBlock() },
-				{ id: "diagnose-pdf-annotation-overlay", name: "Diagnose PDF annotation overlay", run: (session) => session.diagnoseOverlayState() }
+				{ id: "pdf-previous-mixed-page", name: "PDF：上一页", isEnabled: (session) => session.canNavigatePage(-1), run: (session) => session.goToPreviousPage() },
+				{ id: "pdf-next-mixed-page", name: "PDF：下一页", isEnabled: (session) => session.canNavigatePage(1), run: (session) => session.goToNextPage() },
+				{ id: "pdf-undo-annotation-change", name: "PDF：撤销批注", run: (session) => session.undo() },
+				{ id: "pdf-redo-annotation-change", name: "PDF：重做批注", run: (session) => session.redo() },
+				{ id: "pdf-open-mixed-page-list", name: "PDF：打开混合页列表", run: (session) => session.openMixedPageList() },
+				{ id: "pdf-open-go-to-page", name: "PDF：跳转到页…", run: (session) => session.openGoToPage() },
+				{ id: "pdf-add-template-page-end", name: "PDF：在末尾快速添加模板页", run: (session) => session.addTemplatePageToEnd() },
+				{ id: "pdf-add-template-page-before", name: "PDF：在当前页前快速添加模板页", run: (session) => session.addTemplatePageBeforeCurrent() },
+				{ id: "pdf-add-template-page-after", name: "PDF：在当前页后快速添加模板页", run: (session) => session.addTemplatePageAfterCurrent() },
+				{ id: "pdf-duplicate-current-added-page", name: "PDF：复制当前添加页", isEnabled: (session) => session.hasCurrentAddedPage(), run: (session) => session.duplicateCurrentAddedPage() },
+				{ id: "pdf-duplicate-current-added-page-structure", name: "PDF：只复制当前添加页的版式", isEnabled: (session) => session.hasCurrentAddedPage(), run: (session) => session.duplicateCurrentAddedPage(false) },
+				{ id: "pdf-clear-current-added-page", name: "PDF：清空当前添加页内容", isEnabled: (session) => session.hasCurrentAddedPage(), run: (session) => session.clearCurrentAddedPageContents() },
+				{ id: "pdf-delete-current-added-page", name: "PDF：把当前页移到已移除", run: (session) => session.deleteCurrentPage() },
+				{ id: "select-all-page-annotations", name: "选中当前页全部批注", run: (session) => session.selectAllCurrentPageAnnotations() },
+				{ id: "duplicate-selected-annotations", name: "复制所选批注", run: (session) => session.duplicateSelectedTargets() },
+				{ id: "delete-selected-annotations", name: "删除所选批注", run: (session) => session.deleteSelectedTargets() },
+				{ id: "copy-selected-annotations", name: "复制所选批注到剪贴板", run: (session) => session.copySelectedTargets() },
+				{ id: "cut-selected-annotations", name: "剪切所选批注", run: (session) => session.cutSelectedTargets() },
+				{ id: "bring-selected-annotations-to-front", name: "将所选批注置于顶层", run: (session) => session.reorderSelectedTargets("front") },
+				{ id: "send-selected-annotations-to-back", name: "将所选批注置于底层", run: (session) => session.reorderSelectedTargets("back") },
+				{ id: "paste-selected-annotations", name: "粘贴批注", isEnabled: () => this.hasClipboard(), run: (session) => session.pasteClipboard() },
+				{ id: "paste-selected-annotations-in-place", name: "原位粘贴批注", isEnabled: () => this.hasClipboard(), run: (session) => session.pasteClipboard(true) },
+				{ id: "export-selection-snapshot", name: "导出选区快照", run: (session) => session.exportSelectionSnapshot() },
+				{ id: "copy-selection-region-reference", name: "复制选区引用", run: (session) => session.copySelectionRegionReference() },
+				{ id: "copy-selection-annotated-embed", name: "复制选中区域的批注嵌入", run: (session) => session.copySelectionAnnotatedEmbedBlock() },
+				{ id: "diagnose-pdf-annotation-overlay", name: "诊断 PDF 批注层", run: (session) => session.diagnoseOverlayState() }
 			]
 		);
 
@@ -13592,7 +13834,7 @@ export default class PDFAnnotatorPlugin extends Plugin {
 
 		this.addCommand({
 			id: "open-selection-region-reference-from-clipboard",
-			name: "Open selection region reference from clipboard",
+			name: "从剪贴板打开选区引用",
 			callback: () => {
 				void this.openRegionReferenceFromClipboard();
 			}
@@ -13611,7 +13853,7 @@ export default class PDFAnnotatorPlugin extends Plugin {
 			if (!(abstractFile instanceof TFile) || abstractFile.extension.toLowerCase() !== "pdf") {
 				return;
 			}
-			void this.store.migrateForRename(abstractFile, oldPath).catch(() => new Notice("Could not move annotation data. The original sidecar is preserved."));
+			void this.store.migrateForRename(abstractFile, oldPath).catch(() => new Notice("无法移动批注数据。原始附属文件已保留。"));
 		}));
 		this.registerEvent(this.app.vault.on("delete", (abstractFile: TAbstractFile) => {
 			if (!(abstractFile instanceof TFile) || abstractFile.extension.toLowerCase() !== "pdf") {
@@ -13629,6 +13871,7 @@ export default class PDFAnnotatorPlugin extends Plugin {
 	}
 
 	onunload(): void {
+		this.disposeZoomDock?.();
 		this.settingsController.dispose();
 		for (const session of this.sessions.values()) {
 			session.detach();
@@ -13641,26 +13884,26 @@ export default class PDFAnnotatorPlugin extends Plugin {
 		const lastModifiedAt = file.stat.mtime;
 		const formatTime = (timestamp: number) => Number.isFinite(timestamp) && timestamp > 0
 			? new Date(timestamp).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZoneName: "short" })
-			: "Unknown";
+			: "未知";
 		try {
 			this.store.markPdfDeleted(file.path);
 			const paths = await this.store.getRelatedSidecarPaths(file.path);
 			if (!paths.length) return;
-			const remove = await confirmAnnotationAction(this.app, "Delete annotation data JSON?",
-				`${file.name} was deleted. Move its ${paths.length} annotation and recovery JSON ${paths.length === 1 ? "file" : "files"} to trash? Choose Keep data to retain them for recovery.`, "Move to trash", [
-					{ label: "PDF deleted", value: formatTime(deletedAt) },
-					{ label: "PDF last modified", value: formatTime(lastModifiedAt) }
+			const remove = await confirmAnnotationAction(this.app, "删除批注数据 JSON？",
+				`${file.name} 已被删除。要把它的 ${paths.length} 个批注和恢复 JSON 文件移到回收站吗？选择「保留数据」可留作日后恢复。`, "移到回收站", [
+					{ label: "PDF 删除时间", value: formatTime(deletedAt) },
+					{ label: "PDF 最后修改时间", value: formatTime(lastModifiedAt) }
 				]);
 			if (!remove) return;
-			if (await this.app.vault.adapter.exists(file.path)) { new Notice("The PDF was restored. Annotation data was kept."); return; }
+			if (await this.app.vault.adapter.exists(file.path)) { new Notice("PDF 已恢复。批注数据已保留。"); return; }
 			const deleted = await this.store.deleteForPdfPath(file.path);
 			if (deleted) {
 				this.annotatedEmbeds.refreshForPath(`${file.path}.annot.json`);
-				new Notice(`Deleted annotation data for ${file.name}.`);
+				new Notice(`已删除 ${file.name} 的批注数据。`);
 			}
 		} catch (error) {
 			console.error(`freedraw-pdf: failed to delete annotation data for ${file.path}`, error);
-			new Notice(`Could not delete annotation data for ${file.name}.`);
+			new Notice(`无法删除 ${file.name} 的批注数据。`);
 		}
 	}
 
@@ -13671,9 +13914,9 @@ export default class PDFAnnotatorPlugin extends Plugin {
 			const scope = await chooseAnnotationScope(this.app, removeOrphans ? undefined : activePdf);
 			if (!scope) return;
 			const confirmed = await confirmAnnotationAction(this.app,
-				removeOrphans ? "Clean data for deleted PDFs?" : "Combine annotation JSON files?",
-				removeOrphans ? "Move annotation and recovery JSON files whose PDFs are missing to trash? Keep data if the PDFs are still syncing."
-					: "Add missing strokes to each PDF's main JSON. Different versions of a stroke are saved as separate strokes, stacked on the page. Combined recovery copies move to trash after saving.", removeOrphans ? "Move to trash" : "Combine files");
+				removeOrphans ? "清理已删除 PDF 的数据？" : "合并批注 JSON 文件？",
+				removeOrphans ? "把对应 PDF 已不存在的批注和恢复 JSON 移到回收站？如果 PDF 还在同步中，请选择保留数据。"
+					: "把缺失的笔迹补进每个 PDF 的主 JSON。同一笔画的不同版本会作为独立笔画叠放在页面上。合并用过的恢复副本在保存后移到回收站。", removeOrphans ? "移到回收站" : "合并文件");
 			if (!confirmed) return;
 			await Promise.all(Array.from(this.sessions.values()).map(session => session.flushSave()));
 			if (!removeOrphans) {
@@ -13681,20 +13924,20 @@ export default class PDFAnnotatorPlugin extends Plugin {
 				await Promise.all(Array.from(this.sessions.values()).filter(session => session.currentFile && result.pdfs.includes(session.currentFile.path))
 					.map(session => session.refreshCombinedAnnotationData()));
 				for (const path of result.pdfs) this.annotatedEmbeds.refreshForPath(path);
-				showAnnotationReport(this.app, `Added ${result.added} strokes. Removed ${result.removed} recovery copies.${result.kept ? ` ${result.kept} files could not be combined; see the reasons below.` : ""}`, result.rows);
+				showAnnotationReport(this.app, `已补入 ${result.added} 笔，移除 ${result.removed} 个恢复副本。${result.kept ? ` 有 ${result.kept} 个文件无法合并，原因见下方。` : ""}`, result.rows);
 				return;
 			}
 			const result = await this.store.cleanAnnotationFiles(removeOrphans, scope);
-			showAnnotationReport(this.app, `Moved ${result.removed} annotation files for missing PDFs to trash.`, result.rows);
+			showAnnotationReport(this.app, `已把 ${result.removed} 个对应 PDF 已丢失的批注文件移到回收站。`, result.rows);
 		} catch (error) {
 			console.error("freedraw-pdf: annotation cleanup failed", error);
-			new Notice("Annotation cleanup failed. Remaining files were kept.");
+			new Notice("批注清理失败。剩余文件已保留。");
 		}
 	}
 
 	async restoreActiveAnnotationData(): Promise<void> {
 		const session = this.getSessionForLeaf(this.getActivePdfLeaf());
-		if (!session) { new Notice("Open a PDF first."); return; }
+		if (!session) { new Notice("请先打开一个 PDF。"); return; }
 		await session.restoreAnnotationDataFromJson();
 	}
 
@@ -13708,7 +13951,7 @@ export default class PDFAnnotatorPlugin extends Plugin {
 		try {
 			const activeFile = this.app.workspace.getActiveFile();
 			const folderPrefix = activeFile?.parent?.path ? `${activeFile.parent.path}/` : "";
-			const baseName = (options.title.trim() || "New annotatable PDF").replace(/[\\/:*?"<>|]/g, "-");
+			const baseName = (options.title.trim() || "新建可批注 PDF").replace(/[\\/:*?"<>|]/g, "-");
 			const pageCount = clamp(Math.round(options.pageCount), 1, 200);
 			let path = `${folderPrefix}${baseName}.pdf`;
 			let counter = 2;
@@ -13729,7 +13972,7 @@ export default class PDFAnnotatorPlugin extends Plugin {
 				canvas.height = renderDimensions.height;
 				const context = canvas.getContext("2d");
 				if (!context) {
-					new Notice("Could not create blank PDF canvas.");
+					new Notice("无法创建空白 PDF 画布。");
 					return;
 				}
 				context.fillStyle = "#ffffff";
@@ -13756,11 +13999,11 @@ export default class PDFAnnotatorPlugin extends Plugin {
 				pageSize: options.pageSize
 			}));
 			await this.store.save(pdfFile, annotationDocument);
-			new Notice(`Created ${pdfFile.name} (${pageCount} page${pageCount === 1 ? "" : "s"})`);
+			new Notice(`已创建 ${pdfFile.name}（${pageCount} 页）`);
 			await this.openPdfPage(pdfFile, 1);
 		} catch (error) {
 			console.error("freedraw-pdf: failed to create blank annotatable PDF", error);
-			new Notice("Could not create blank annotatable PDF. Check the developer console for details.");
+			new Notice("无法创建可批注的空白 PDF。详情请看开发者控制台。");
 		}
 	}
 
@@ -13816,11 +14059,11 @@ export default class PDFAnnotatorPlugin extends Plugin {
 	}
 	hasOcrCredential(): boolean { return Boolean(this.getOcrCredential()); }
 	setOcrCredential(value: string): void {
-		if(!this.app.secretStorage){new Notice("Obsidian secret storage is unavailable. Update Obsidian before configuring OCR credentials.");return;}
+		if(!this.app.secretStorage){new Notice("Obsidian 机密存储不可用。配置 OCR 凭据前请先更新 Obsidian。");return;}
 		if (!value) { this.app.secretStorage.setSecret(this.ocrSecretId(), ""); return; }
 		let target: string;
 		try { target = this.ocrCredentialTarget(); }
-		catch { new Notice("Set a valid recognition endpoint before saving its API key."); return; }
+		catch { new Notice("保存 API 密钥前，请先填写有效的识别服务地址。"); return; }
 		this.app.secretStorage.setSecret(this.ocrSecretId(), JSON.stringify({ format: "freedraw-ocr-credential-v1", target, value }));
 	}
 
@@ -13977,13 +14220,13 @@ export default class PDFAnnotatorPlugin extends Plugin {
 			const raw = await readClipboardText();
 			const opened = await this.openRegionReference(raw);
 			if (!opened) {
-				new Notice("Clipboard does not contain a valid selection region reference.");
+				new Notice("剪贴板里没有有效的选区引用。");
 				return;
 			}
-			new Notice("Opened selection region reference.");
+			new Notice("已打开选区引用。");
 		} catch (error) {
 			console.error("freedraw-pdf: failed to open region reference from clipboard", error);
-			new Notice("Could not read clipboard for region reference.");
+			new Notice("无法从剪贴板读取选区引用。");
 		}
 	}
 
@@ -14030,7 +14273,7 @@ export default class PDFAnnotatorPlugin extends Plugin {
 		await this.syncSessions();
 		const session = this.getSessionForLeaf(leaf);
 		if (!session) {
-			new Notice(`Opened ${file.name}. Page ${pageNumber} will be available after the PDF view finishes loading.`);
+			new Notice(`已打开 ${file.name}。第 ${pageNumber} 页会在 PDF 视图加载完成后可用。`);
 			return;
 		}
 		if (rect) {
@@ -14043,7 +14286,7 @@ export default class PDFAnnotatorPlugin extends Plugin {
 	private async toggleActiveSessionMode(): Promise<void> {
 		const session = await this.ensureActivePdfSession();
 		if (!session) {
-			new Notice("Open a PDF in Obsidian's built-in viewer first.");
+			new Notice("请先用 Obsidian 内置查看器打开一个 PDF。");
 			return;
 		}
 		session.toggleAnnotationMode();

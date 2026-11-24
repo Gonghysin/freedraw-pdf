@@ -33,15 +33,15 @@ export function clampToolWidth(kind: ToolPresetKind, width: number): number {
 }
 
 export const DEFAULT_TOOL_PRESETS: ToolPreset[] = [
-	{ id: "pen-slot-1", label: "Pen 1", kind: "pen", color: "#ff6b57", width: 3, opacity: 0.96 },
-	{ id: "pen-slot-2", label: "Pen 2", kind: "pen", color: "#55b4ff", width: 5, opacity: 0.96 },
-	{ id: "pen-slot-3", label: "Pen 3", kind: "pen", color: "#a855f7", width: 8, opacity: 0.96 },
-	{ id: "highlight-slot-1", label: "Highlighter 1", kind: "highlighter", color: "#ffcb47", width: 12, opacity: 0.24 },
-	{ id: "highlight-slot-2", label: "Highlighter 2", kind: "highlighter", color: "#6bcf8a", width: 16, opacity: 0.22 },
-	{ id: "highlight-slot-3", label: "Highlighter 3", kind: "highlighter", color: "#8fdff0", width: 20, opacity: 0.22 },
-	{ id: "eraser-slot-1", label: "Eraser 1", kind: "eraser", color: "#ffffff", width: 10, opacity: 1 },
-	{ id: "eraser-slot-2", label: "Eraser 2", kind: "eraser", color: "#ffffff", width: 18, opacity: 1 },
-	{ id: "eraser-slot-3", label: "Eraser 3", kind: "eraser", color: "#ffffff", width: 30, opacity: 1 }
+	{ id: "pen-slot-1", label: "笔刷 1", kind: "pen", color: "#ff6b57", width: 3, opacity: 0.96 },
+	{ id: "pen-slot-2", label: "笔刷 2", kind: "pen", color: "#55b4ff", width: 5, opacity: 0.96 },
+	{ id: "pen-slot-3", label: "笔刷 3", kind: "pen", color: "#a855f7", width: 8, opacity: 0.96 },
+	{ id: "highlight-slot-1", label: "荧光笔 1", kind: "highlighter", color: "#ffcb47", width: 12, opacity: 0.24 },
+	{ id: "highlight-slot-2", label: "荧光笔 2", kind: "highlighter", color: "#6bcf8a", width: 16, opacity: 0.22 },
+	{ id: "highlight-slot-3", label: "荧光笔 3", kind: "highlighter", color: "#8fdff0", width: 20, opacity: 0.22 },
+	{ id: "eraser-slot-1", label: "橡皮 1", kind: "eraser", color: "#ffffff", width: 10, opacity: 1 },
+	{ id: "eraser-slot-2", label: "橡皮 2", kind: "eraser", color: "#ffffff", width: 18, opacity: 1 },
+	{ id: "eraser-slot-3", label: "橡皮 3", kind: "eraser", color: "#ffffff", width: 30, opacity: 1 }
 ];
 
 export const TEXT_FONT_FAMILIES = [
@@ -55,21 +55,21 @@ export const TEXT_FONT_FAMILIES = [
 export const TEXT_FONT_SIZES = [12, 14, 16, 18, 20, 24, 28, 32, 40, 48];
 
 export const TEXT_COLOR_PRESETS = [
-	{ color: "#202124", label: "Black" },
-	{ color: "#ff6b57", label: "Coral" },
-	{ color: "#ffcb47", label: "Yellow" },
-	{ color: "#55b4ff", label: "Blue" },
-	{ color: "#6bcf8a", label: "Green" },
-	{ color: "#a855f7", label: "Violet" }
+	{ color: "#202124", label: "黑色" },
+	{ color: "#ff6b57", label: "珊瑚红" },
+	{ color: "#ffcb47", label: "黄色" },
+	{ color: "#55b4ff", label: "蓝色" },
+	{ color: "#6bcf8a", label: "绿色" },
+	{ color: "#a855f7", label: "紫色" }
 ];
 
 export const PAPER_COLOR_PRESETS = [
-	{ label: "Cream", color: "#fffdf7" },
-	{ label: "White", color: "#ffffff" },
-	{ label: "Soft yellow", color: "#fff7cc" },
-	{ label: "Blue tint", color: "#eef6ff" },
-	{ label: "Green tint", color: "#effaf0" },
-	{ label: "Gray", color: "#f3f3f3" }
+	{ label: "米色", color: "#fffdf7" },
+	{ label: "白色", color: "#ffffff" },
+	{ label: "浅黄", color: "#fff7cc" },
+	{ label: "浅蓝", color: "#eef6ff" },
+	{ label: "浅绿", color: "#effaf0" },
+	{ label: "灰色", color: "#f3f3f3" }
 ];
 
 export const DEFAULT_TOOL_STATE: ToolStateSnapshot = {
@@ -131,7 +131,8 @@ export const DEFAULT_SETTINGS: PDFAnnotatorSettings = {
 		easing: "linear",
 		taperStart: 0,
 		taperEnd: 0,
-		pressureMode: "auto"
+		pressureMode: "auto",
+		mouseSmoothing: 0.5
 	},
 	autosaveDelayMs: 600
 };

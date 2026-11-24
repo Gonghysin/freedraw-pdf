@@ -2,7 +2,7 @@ import { distanceToSegment, segmentsIntersect, type GeometryPoint } from "../ann
 import { annotationOpacity } from "./shapeOptions";
 import type { ShapeAnnotation } from "../types";
 
-export type ShapeGeometryInput = Pick<ShapeAnnotation, "start" | "end" | "width" | "widthScale" | "lineStyle" | "waveSize" | "aspectRatio" | "vertices" | "clippedGeometry"> & { tool?: string };
+export type ShapeGeometryInput = Pick<ShapeAnnotation, "start" | "end" | "width" | "widthScale" | "lineStyle" | "waveSize" | "aspectRatio" | "vertices" | "clippedGeometry"> & { tool?: string; filled?: boolean };
 
 function geometryBox(shape: Pick<ShapeAnnotation, "start" | "end">) {
 	const dx = Math.abs(shape.end.x - shape.start.x), dy = Math.abs(shape.end.y - shape.start.y);
@@ -60,7 +60,7 @@ export function shapeGeometry(shape: ShapeGeometryInput): { paths: GeometryPoint
 	return result;
 }
 
-type DrawingContext = Pick<CanvasRenderingContext2D, "save" | "restore" | "beginPath" | "moveTo" | "lineTo" | "arc" | "ellipse" | "strokeRect" | "stroke" | "fill" | "setLineDash" | "strokeStyle" | "fillStyle" | "lineWidth" | "lineCap" | "lineJoin" | "globalAlpha">;
+type DrawingContext = Pick<CanvasRenderingContext2D, "save" | "restore" | "beginPath" | "closePath" | "moveTo" | "lineTo" | "arc" | "ellipse" | "strokeRect" | "stroke" | "fill" | "setLineDash" | "strokeStyle" | "fillStyle" | "lineWidth" | "lineCap" | "lineJoin" | "globalAlpha">;
 export function renderShape(context: DrawingContext, shape: ShapeAnnotation, width: number, height: number): void {
 	const geometry = shapeGeometry(shape);
 	context.save();
@@ -68,7 +68,8 @@ export function renderShape(context: DrawingContext, shape: ShapeAnnotation, wid
 	context.lineWidth = Math.max(1, shapeWidthScale(shape) * width);
 	context.globalAlpha = annotationOpacity(shape); context.lineCap = "round"; context.lineJoin = "round"; context.setLineDash([]);
 	// Preserve exact legacy primitives. New line styles/triangles use shared paths.
-	if (!shape.clippedGeometry && shape.tool === "rectangle") context.strokeRect(shape.start.x * width, shape.start.y * height, (shape.end.x - shape.start.x) * width, (shape.end.y - shape.start.y) * height);
+	if (!shape.clippedGeometry && shape.tool === "rectangle" && shape.filled) { const x0 = shape.start.x * width, y0 = shape.start.y * height, x1 = shape.end.x * width, y1 = shape.end.y * height; context.beginPath(); context.moveTo(x0, y0); context.lineTo(x1, y0); context.lineTo(x1, y1); context.lineTo(x0, y1); context.closePath(); context.fill(); }
+	else if (!shape.clippedGeometry && shape.tool === "rectangle") context.strokeRect(shape.start.x * width, shape.start.y * height, (shape.end.x - shape.start.x) * width, (shape.end.y - shape.start.y) * height);
 	else if (!shape.clippedGeometry && shape.tool === "ellipse") {
 		context.beginPath(); context.ellipse((shape.start.x + shape.end.x) / 2 * width, (shape.start.y + shape.end.y) / 2 * height, Math.abs(shape.end.x - shape.start.x) / 2 * width, Math.abs(shape.end.y - shape.start.y) / 2 * height, 0, 0, Math.PI * 2); context.stroke();
 	} else if (geometry.dots.length) {
@@ -83,7 +84,12 @@ export function renderShape(context: DrawingContext, shape: ShapeAnnotation, wid
 	context.restore();
 }
 
+function insideFilledRect(point: GeometryPoint, shape: ShapeGeometryInput): boolean {
+	return !!shape.filled && shape.tool === "rectangle" && !shape.clippedGeometry && point.x >= Math.min(shape.start.x, shape.end.x) && point.x <= Math.max(shape.start.x, shape.end.x) && point.y >= Math.min(shape.start.y, shape.end.y) && point.y <= Math.max(shape.start.y, shape.end.y);
+}
+
 export function distanceToShapeGeometry(point: GeometryPoint, shape: ShapeGeometryInput): number {
+	if (insideFilledRect(point, shape)) return 0;
 	const { paths, dots, radius, aspect } = shapeGeometry(shape);
 	let best = Infinity;
 	for (const path of paths) for (let i = 1; i < path.length; i++) best = Math.min(best, distanceToSegment(point, path[i - 1], path[i]));
@@ -92,6 +98,7 @@ export function distanceToShapeGeometry(point: GeometryPoint, shape: ShapeGeomet
 }
 
 export function shapeIntersectsSegment(shape: ShapeGeometryInput, start: GeometryPoint, end: GeometryPoint, tolerance: number): boolean {
+	if (insideFilledRect(start, shape) || insideFilledRect(end, shape)) return true;
 	const geometry = shapeGeometry(shape), limit = tolerance + geometry.radius;
 	for (const path of geometry.paths) for (let i = 1; i < path.length; i++) {
 		const a = path[i - 1], b = path[i];

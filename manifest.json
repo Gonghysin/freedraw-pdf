@@ -1,9 +1,9 @@
 {
   "id": "freedraw-pdf",
-  "name": "Freedraw PDF",
+  "name": "手绘 PDF",
   "version": "0.13.8",
   "minAppVersion": "1.12.0",
-  "description": "Freehand PDF annotation workspace with vault-backed sidecar saves.",
+  "description": "在 PDF 上自由手写批注，批注保存在库内的附属文件中。",
   "author": "vida sana",
   "isDesktopOnly": false
 }

@@ -72,7 +72,8 @@ const DEFAULT_INK_RENDER_SETTINGS: InkRenderSettings = {
 	easing: "linear",
 	taperStart: 0,
 	taperEnd: 0,
-	pressureMode: "auto"
+	pressureMode: "auto",
+	mouseSmoothing: 0.5
 };
 
 let activeInkRenderSettings: InkRenderSettings = { ...DEFAULT_INK_RENDER_SETTINGS };
@@ -94,7 +95,8 @@ export function setInkRenderSettings(settings: Partial<InkRenderSettings> | null
 		taperEnd: clamp(settings?.taperEnd ?? DEFAULT_INK_RENDER_SETTINGS.taperEnd, 0, 120),
 		pressureMode: settings?.pressureMode === "stylus" || settings?.pressureMode === "simulate"
 			? settings.pressureMode
-			: "auto"
+			: "auto",
+		mouseSmoothing: clamp(settings?.mouseSmoothing ?? DEFAULT_INK_RENDER_SETTINGS.mouseSmoothing ?? 0.5, 0, 1)
 	};
 }
 

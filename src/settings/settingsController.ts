@@ -70,7 +70,8 @@ export function normalizeInkRenderSettings(value: unknown): InkRenderSettings {
 		easing: normalizeInkEasingMode(raw.easing),
 		taperStart: clampNumber(raw.taperStart, DEFAULT_SETTINGS.inkRenderSettings.taperStart, 0, 120),
 		taperEnd: clampNumber(raw.taperEnd, DEFAULT_SETTINGS.inkRenderSettings.taperEnd, 0, 120),
-		pressureMode: normalizeInkPressureMode(raw.pressureMode)
+		pressureMode: normalizeInkPressureMode(raw.pressureMode),
+		mouseSmoothing: clampNumber(raw.mouseSmoothing, DEFAULT_SETTINGS.inkRenderSettings.mouseSmoothing ?? 0.5, 0, 1)
 	};
 }
 
@@ -162,6 +163,8 @@ export class PDFAnnotatorSettingsController {
 		if (this.settingsSaveHandle !== null) {
 			window.clearTimeout(this.settingsSaveHandle);
 			this.settingsSaveHandle = null;
+			// Flush a pending save so the last tool choice survives quitting Obsidian.
+			void this.saveData(this.settings);
 		}
 	}
 

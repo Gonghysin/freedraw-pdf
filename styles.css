@@ -2355,3 +2355,12 @@ svg.pdf-native-annotator-vector > .freedraw-pdf-scroll-preview-hidden { display:
 	.pdf-native-annotator-native-modal .modal-header-button,
 	.pdf-native-annotator-dialog .modal-header-button { transition: none; }
 }
+
+.freedraw-pdf-zoom-dock { position: fixed; z-index: 35; display: flex; gap: 4px; padding: 4px; border-radius: 10px; background: var(--background-primary); border: 1px solid var(--background-modifier-border); box-shadow: var(--shadow-s); }
+.freedraw-pdf-zoom-dock button { border: 0; border-radius: 7px; background: transparent; color: var(--text-normal); padding: 4px 8px; font-size: 12px; cursor: pointer; box-shadow: none; height: auto; }
+.freedraw-pdf-zoom-dock button.is-active, .freedraw-pdf-zoom-dock button:hover { background: var(--background-modifier-hover); }
+
+.pdf-thumbnail-view .freedraw-dragging { opacity: 0.45; }
+.pdf-thumbnail-view .freedraw-drop-before { box-shadow: 0 -3px 0 0 var(--interactive-accent); }
+.pdf-thumbnail-view .freedraw-drop-after { box-shadow: 0 3px 0 0 var(--interactive-accent); }
+.pdf-thumbnail-view .pdf-native-annotator-native-page-entry .thumbnail { cursor: grab; }

@@ -121,7 +121,7 @@ export class ScrollPreviewCache {
 
 async function rasterizeSvgBody(root: SVGSVGElement, body: SVGGElement, width: number, height: number): Promise<ScrollPreviewSnapshot> {
 	const host = root.ownerDocument.defaultView;
-	if (!host || width <= 0 || height <= 0) throw new Error("Annotation preview window unavailable");
+	if (!host || width <= 0 || height <= 0) throw new Error("批注预览窗口不可用");
 	const ratio = Math.min(1, 1024 / width, 1024 / height, Math.sqrt((512 * 1024) / (width * height)));
 	const pixelWidth = Math.max(1, Math.floor(width * ratio)), pixelHeight = Math.max(1, Math.floor(height * ratio));
 	// Bound copying/serialization before cloning a potentially enormous SVG tree.
@@ -131,7 +131,7 @@ async function rasterizeSvgBody(root: SVGSVGElement, body: SVGGElement, width: n
 		const element = node as Element;
 		characters += Array.from(element.attributes).reduce((sum, attribute) => sum + attribute.value.length + attribute.name.length + 8, 0);
 		if (element.localName === "text") characters += element.textContent?.length ?? 0;
-		if (++count > 12000 || characters > 4 * 1024 * 1024) throw new Error("Annotation preview exceeds copy budget");
+		if (++count > 12000 || characters > 4 * 1024 * 1024) throw new Error("批注预览超出复制上限");
 	}
 	const svg = host.createFragment().createSvg("svg", { attr: {
 		xmlns: "http://www.w3.org/2000/svg", width: pixelWidth, height: pixelHeight,
@@ -139,7 +139,7 @@ async function rasterizeSvgBody(root: SVGSVGElement, body: SVGGElement, width: n
 	} });
 	svg.appendChild(body.cloneNode(true));
 	const markup = new host.XMLSerializer().serializeToString(svg);
-	if (markup.length > 4 * 1024 * 1024) throw new Error("Annotation preview exceeds serialization budget");
+	if (markup.length > 4 * 1024 * 1024) throw new Error("批注预览超出序列化上限");
 	const sourceUrl = host.URL.createObjectURL(new host.Blob([markup], { type: "image/svg+xml" }));
 	const image = new host.Image();
 	const canvas = host.createEl("canvas");
@@ -149,10 +149,10 @@ async function rasterizeSvgBody(root: SVGSVGElement, body: SVGGElement, width: n
 		await image.decode();
 		canvas.width = pixelWidth; canvas.height = pixelHeight;
 		const context = canvas.getContext("2d");
-		if (!context) throw new Error("Annotation preview canvas unavailable");
+		if (!context) throw new Error("批注预览画布不可用");
 		context.drawImage(image, 0, 0, pixelWidth, pixelHeight);
 		const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => {
-			if (value) resolve(value); else reject(new Error("Annotation preview encoding failed"));
+			if (value) resolve(value); else reject(new Error("批注预览编码失败"));
 		}, "image/png"));
 		outputUrl = host.URL.createObjectURL(blob);
 		const href = outputUrl;

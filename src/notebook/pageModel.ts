@@ -28,16 +28,18 @@ export function createTemplateNotebookPage(
 	title: string,
 	template: NotebookTemplate,
 	pageSize: NotebookPageSize,
-	paperColor: string
+	paperColor: string,
+	customSize?: { width: number; height: number }
 ): NotebookPage {
 	return {
 		id: generateId("page"),
 		title,
 		kind: "template",
-		sourceLabel: "Template page",
+		sourceLabel: "模板页",
 		template,
 		paperColor,
 		pageSize,
+		...(customSize ? { customSize } : {}),
 		strokes: [],
 		textItems: [],
 		shapes: []
@@ -55,7 +57,7 @@ export function createPdfBackedNotebookPage(
 		id: generateId("page"),
 		title,
 		kind: "pdf",
-		sourceLabel: `${sourceFile.name} page ${sourcePage}`,
+		sourceLabel: `${sourceFile.name} 第 ${sourcePage} 页`,
 		pdfSource: {
 			filePath: sourceFile.path,
 			page: sourcePage
@@ -71,9 +73,9 @@ export function createPdfBackedNotebookPage(
 
 export function getNotebookPageKindLabel(page: NotebookPage): string {
 	if (page.kind === "pdf" && page.pdfSource) {
-		return `PDF page ${page.pdfSource.page}`;
+		return `PDF 第 ${page.pdfSource.page} 页`;
 	}
-	return "Template page";
+	return "模板页";
 }
 
 export function getNotebookPageSourceSummary(page: NotebookPage): string {
@@ -87,32 +89,33 @@ export function getNotebookPageSourceSummary(page: NotebookPage): string {
 export function getNotebookTemplateLabel(template: NotebookTemplate): string {
 	switch (template) {
 		case "blank":
-			return "Blank";
+			return "空白";
 		case "grid":
-			return "Grid";
+			return "网格";
 		case "dot":
-			return "Dot grid";
+			return "点阵";
 		case "ruled":
 		default:
-			return "Ruled lines";
+			return "横线";
 	}
 }
 
 export function getNotebookPageSizeLabel(pageSize: NotebookPageSize): string {
 	switch (pageSize) {
 		case "compact":
-			return "Compact";
+			return "紧凑";
 		case "letter":
-			return "Letter portrait";
+			return "Letter 竖向";
 		case "long":
-			return "Long notes";
+			return "长笔记";
 		case "a4":
 		default:
-			return "A4 portrait";
+			return "A4 竖向";
 	}
 }
 
-export function getNotebookPageSizeDimensions(pageSize: NotebookPageSize): { width: number; height: number } {
+export function getNotebookPageSizeDimensions(pageSize: NotebookPageSize, custom?: { width: number; height: number }): { width: number; height: number } {
+	if (custom && custom.width > 0 && custom.height > 0) return custom;
 	switch (pageSize) {
 		case "compact":
 			return { width: 700, height: 980 };
@@ -126,8 +129,8 @@ export function getNotebookPageSizeDimensions(pageSize: NotebookPageSize): { wid
 	}
 }
 
-export function getNotebookPageRenderDimensions(pageSize: NotebookPageSize, a4ReferenceWidth: number): { width: number; height: number } {
-	const dimensions = getNotebookPageSizeDimensions(pageSize);
+export function getNotebookPageRenderDimensions(pageSize: NotebookPageSize, a4ReferenceWidth: number, custom?: { width: number; height: number }): { width: number; height: number } {
+	const dimensions = getNotebookPageSizeDimensions(pageSize, custom);
 	const a4Dimensions = getNotebookPageSizeDimensions("a4");
 	const width = Math.max(1, Math.round(a4ReferenceWidth * dimensions.width / Math.max(a4Dimensions.width, 1)));
 	const height = Math.max(1, Math.round(width * dimensions.height / Math.max(dimensions.width, 1)));

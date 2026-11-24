@@ -17,6 +17,20 @@ Requires **Obsidian 1.12.0 or later**.
 - **Note embeds:** display an annotated page or selected region inside a Markdown note.
 - **Export:** create a separate annotated PDF, including added pages and selectable typed or accepted OCR text.
 
+## 本分支的改动（中文社区版）
+
+本仓库是 [vividasasana/freedraw-pdf](https://github.com/vividasasana/freedraw-pdf)（MIT）的分支，原作者版权保留。相对上游的改动：
+
+- 界面文字原生汉化，不再依赖运行时翻译层。
+- 可直接在 PDF 上粘贴图片；文字默认字号 35。
+- 恢复右下角缩放条：宽度适合 / 适合页面 / 实际大小。
+- “快速添加”生成与当前页同尺寸的白色空白页。
+- 荧光笔新增“区域高亮”（拖出矩形即高亮），并记住上次使用的工具和模式（重启后仍保留）。
+- 鼠标 / 触控板笔迹平滑（One Euro 滤波，可在设置中调节）。
+- 左侧缩略图可拖动调整新增页面的顺序。
+- 笔迹可跨页延续。
+- 导出带批注的 PDF（包含新增页面与批注）。
+
 ## What’s new in 0.13.8
 
 - Optional OCR with Gemini, an OpenAI-compatible service or a separately installed local helper.

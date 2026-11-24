@@ -4,7 +4,7 @@ import type { InkToolOptions, InkToolKind, ShapeInkStyle, ShapeOptions } from ".
 export function normalizeInkToolOptions(value?: Partial<InkToolOptions>): InkToolOptions {
 	const shape = normalizeShapeOptions({ method: "hold", shape: value?.holdShape, lineStyle: value?.lineStyle, waveSize: value?.waveSize });
 	return {
-		mode: value?.mode === "straight" ? "straight" : "freehand",
+		mode: value?.mode === "straight" || value?.mode === "region" ? value.mode : "freehand",
 		holdShape: "auto",
 		lineStyle: shape.lineStyle,
 		waveSize: shape.waveSize
@@ -18,6 +18,7 @@ export function normalizeInkToolOptionsByKind(value?: Partial<Record<InkToolKind
 /** Freeze the chosen behaviour and measured tool style at pointerdown. */
 export function inkToolShapeOptions(kind: InkToolKind, value: InkToolOptions, style: ShapeInkStyle, shiftOverride = false): ShapeOptions | null {
 	const options = normalizeInkToolOptions(value);
+	if (options.mode === "region") return normalizeShapeOptions({ method: "drag", shape: "rectangle", appearance: kind, filled: true, [kind]: { ...style } });
 	if (!shiftOverride && options.mode === "freehand") return null;
 	const method = !shiftOverride && options.mode === "hold" ? "hold" : "drag";
 	return normalizeShapeOptions({

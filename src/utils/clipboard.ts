@@ -8,7 +8,7 @@ export async function writeClipboardText(text: string): Promise<void> {
 		await navigator.clipboard.writeText(text);
 		return;
 	}
-	throw new Error("Clipboard write is unavailable in this Obsidian environment.");
+	throw new Error("当前 Obsidian 环境无法写入剪贴板。");
 }
 
 export async function readClipboardText(): Promise<string> {
@@ -19,5 +19,5 @@ export async function readClipboardText(): Promise<string> {
 	if (navigator.clipboard?.readText) {
 		return navigator.clipboard.readText();
 	}
-	throw new Error("Clipboard read is unavailable in this Obsidian environment.");
+	throw new Error("当前 Obsidian 环境无法读取剪贴板。");
 }

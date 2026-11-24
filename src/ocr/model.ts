@@ -48,7 +48,7 @@ export function normalizeOcrGroups(value: unknown): OcrGroup[] {
 			typeof g.sourceFingerprint !== "string" || typeof g.text !== "string" || g.text.length > 50000 || !Array.isArray(g.lines) || !g.lines.length || g.lines.length > 500 ||
 			!g.lines.every((line: OcrLine) => line && typeof line.text === "string" && line.text.length <= 5000 && validOcrBox(line.box)) || (g.mode !== "ink" && g.mode !== "text")) return false;
 		ids.add(g.id); return true;
-	}).map(g => ({ id:g.id,page:g.page,strokeIds:[...g.strokeIds],sourceFingerprint:g.sourceFingerprint,text:g.text,lines:g.lines.map(l => ({text:l.text,box:{...l.box}})),mode:g.mode,provider:typeof g.provider === "string" ? g.provider.slice(0,150) : "Imported",createdAt:typeof g.createdAt === "string" ? g.createdAt : "" }));
+	}).map(g => ({ id:g.id,page:g.page,strokeIds:[...g.strokeIds],sourceFingerprint:g.sourceFingerprint,text:g.text,lines:g.lines.map(l => ({text:l.text,box:{...l.box}})),mode:g.mode,provider:typeof g.provider === "string" ? g.provider.slice(0,150) : "已导入",createdAt:typeof g.createdAt === "string" ? g.createdAt : "" }));
 }
 /** Accepted recognition remains usable independently of its visible ink/text mode. */
 export function getValidOcrGroups(document: AnnotationDocument, page: number, pageStrokes?: readonly StrokeAnnotation[], mode?: "ink" | "text"): OcrGroup[] {

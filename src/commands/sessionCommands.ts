@@ -1,8 +1,9 @@
-import type { Command } from "obsidian";
+import type { Command, Hotkey } from "obsidian";
 
 export interface SessionCommandDefinition<TSession> {
 	id: string;
 	name: string;
+	hotkeys?: Hotkey[];
 	isEnabled?: (session: TSession) => boolean;
 	run: (session: TSession) => unknown;
 }
@@ -18,6 +19,7 @@ export function registerSessionCommands<TSession>(
 		register({
 			id: definition.id,
 			name: definition.name,
+			hotkeys: definition.hotkeys,
 			checkCallback: (checking: boolean) => {
 				const session = resolveSession();
 				if (!session) {

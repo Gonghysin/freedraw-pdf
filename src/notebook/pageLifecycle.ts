@@ -172,3 +172,38 @@ export function permanentlyDeleteHiddenPdfPage(document: AnnotationDocument, pag
 	}
 	return true;
 }
+
+/** Reorders an added page within appendedPages and renumbers every annotation. Returns old->new page numbers. */
+export function moveSyntheticPageIndex(
+	document: AnnotationDocument,
+	realPdfPageCount: number,
+	fromIndex: number,
+	toIndex: number
+): (oldPage: number) => number {
+	ensurePageCollections(document);
+	const pages = document.appendedPages!;
+	const identity = (page: number): number => page;
+	if (fromIndex < 0 || fromIndex >= pages.length || toIndex < 0 || toIndex >= pages.length || fromIndex === toIndex) return identity;
+	const base = Math.max(0, realPdfPageCount);
+	const mapPage = (page: number): number => {
+		const index = page - base - 1;
+		if (index < 0 || index >= pages.length) return page;
+		if (index === fromIndex) return base + toIndex + 1;
+		if (fromIndex < toIndex && index > fromIndex && index <= toIndex) return page - 1;
+		if (fromIndex > toIndex && index >= toIndex && index < fromIndex) return page + 1;
+		return page;
+	};
+	const remap = <T extends PageAnnotation>(items: T[]): T[] => items.map((item) => {
+		const next = mapPage(item.page);
+		return next === item.page ? item : { ...item, page: next };
+	});
+	document.strokes = remap(document.strokes);
+	document.eraserPaths = remap(document.eraserPaths!);
+	document.textItems = remap(document.textItems);
+	document.shapes = remap(document.shapes);
+	document.imageItems = remap(document.imageItems!);
+	if (document.ocrGroups) document.ocrGroups = remap(document.ocrGroups);
+	const [moved] = pages.splice(fromIndex, 1);
+	pages.splice(toIndex, 0, moved);
+	return mapPage;
+}

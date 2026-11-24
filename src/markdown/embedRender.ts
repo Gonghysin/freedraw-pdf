@@ -158,12 +158,12 @@ export async function renderAnnotationDocumentPageImages(
 
 function loadImageAnnotation(imageItem: ImageAnnotation): Promise<HTMLImageElement> {
 	if (!isEmbeddedImageDataUrl(imageItem.dataUrl)) {
-		return Promise.reject(new Error("Image annotations must contain embedded image data."));
+		return Promise.reject(new Error("图片批注必须包含内嵌的图片数据。"));
 	}
 	return new Promise((resolve, reject) => {
 		const image = new Image();
 		image.onload = () => resolve(image);
-		image.onerror = () => reject(new Error(`Could not load image annotation ${imageItem.name}.`));
+		image.onerror = () => reject(new Error(`无法加载图片批注 ${imageItem.name}。`));
 		image.src = imageItem.dataUrl;
 	});
 }

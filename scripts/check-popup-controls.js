@@ -6,7 +6,7 @@ vm.runInNewContext(ts.transpileModule('class Session{'+cls.members.find(n=>n.nam
 let failures=0;function check(name,fn){try{fn();console.log('PASS '+name)}catch(e){failures++;console.error('FAIL '+name+': '+e.message)}}
 check('Close button waits for activation, allowing press feedback and pointer cancellation',()=>{
  let closed=0;const button=new context.Session().createPopoverCloseButton(()=>closed++);
- assert.equal(button.type,'button');assert.equal(button.attrs['aria-label'],'Close');
+ assert.equal(button.type,'button');assert.equal(button.attrs['aria-label'],'关闭');
  assert.ok(button.className.split(' ').includes('clickable-icon'),'Close must opt out of native raised text-button styling');
  button.emit('pointerdown');assert.equal(closed,0,'Do not dismiss before a pressed frame can be shown');
  button.emit('pointercancel');assert.equal(closed,0);button.emit('click');assert.equal(closed,1);

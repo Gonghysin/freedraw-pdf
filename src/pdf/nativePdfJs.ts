@@ -1,6 +1,6 @@
 import { loadPdfJs } from "obsidian";
 
-export const PDF_JS_LOAD_ERROR_MESSAGE = "Obsidian PDF.js could not be loaded.";
+export const PDF_JS_LOAD_ERROR_MESSAGE = "无法加载 Obsidian 的 PDF.js。";
 
 export type NativePdfPage = {
 	getViewport: (options: { scale: number }) => { width: number; height: number };

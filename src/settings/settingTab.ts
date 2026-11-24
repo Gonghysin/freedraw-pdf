@@ -52,16 +52,16 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 		return [
 			...shapeOptionRows(() => this.plugin.getToolDefaults().shapeOptions, options => this.plugin.updateShapeToolOptions(options)),
 			{
-				name: "Toolbar placement",
-				desc: "Keep annotation controls inside the PDF toolbar, or use a floating toolbar when another extension causes overlap.",
+				name: "工具栏位置",
+				desc: "把批注控件放在 PDF 工具栏里；若和其他扩展重叠，可改用浮动工具栏。",
 				render: (setting) => {
 					setting
-						.setName("Toolbar placement")
-						.setDesc("Keep annotation controls inside the PDF toolbar, or use a floating toolbar when another extension causes overlap.")
+						.setName("工具栏位置")
+						.setDesc("把批注控件放在 PDF 工具栏里；若和其他扩展重叠，可改用浮动工具栏。")
 						.addDropdown((dropdown) => {
 							dropdown
-								.addOption("inline", "Inside PDF toolbar")
-								.addOption("floating", "Floating")
+								.addOption("inline", "放在 PDF 工具栏内")
+								.addOption("floating", "浮动")
 								.setValue(this.plugin.getInlineToolbarPreference() ? "inline" : "floating")
 								.onChange(async (value) => {
 									await this.plugin.updateBehaviorSettings({ preferInlineToolbar: value === "inline" });
@@ -70,47 +70,47 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 				}
 			},
 			{
-				name: "Region capture button",
-				desc: "Show Region directly in the toolbar. When hidden, Region remains available from More.",
+				name: "区域截取按钮",
+				desc: "在工具栏直接显示区域截取。隐藏后仍可从「更多」里使用。",
 				render: setting => {
-					setting.setName("Region capture button").setDesc("Show Region directly in the toolbar. When hidden, Region remains available from More.").addToggle(toggle => toggle.setValue(this.plugin.shouldShowRegionToolbarButton()).onChange(value => { void this.plugin.updateBehaviorSettings({ showRegionToolbarButton: value }); }));
+					setting.setName("区域截取按钮").setDesc("在工具栏直接显示区域截取。隐藏后仍可从「更多」里使用。").addToggle(toggle => toggle.setValue(this.plugin.shouldShowRegionToolbarButton()).onChange(value => { void this.plugin.updateBehaviorSettings({ showRegionToolbarButton: value }); }));
 				}
 			},
 			{
-				name: "Toolbar alignment",
-				desc: "Align annotation controls to the left beside the PDF controls, or to the right. Both layouts can still scroll.",
+				name: "工具栏对齐",
+				desc: "批注控件靠左（紧挨 PDF 控件）或靠右。两种布局都可以滚动。",
 				render: setting => {
-					setting.setName("Toolbar alignment").setDesc("Align annotation controls to the left beside the PDF controls, or to the right. Both layouts can still scroll.").addDropdown(dropdown => dropdown.addOptions({ left: "Left", right: "Right" }).setValue(this.plugin.getToolbarAlignment()).onChange(value => { void this.plugin.updateBehaviorSettings({ toolbarAlignment: value === "right" ? "right" : "left" }); }));
+					setting.setName("工具栏对齐").setDesc("批注控件靠左（紧挨 PDF 控件）或靠右。两种布局都可以滚动。").addDropdown(dropdown => dropdown.addOptions({ left: "靠左", right: "靠右" }).setValue(this.plugin.getToolbarAlignment()).onChange(value => { void this.plugin.updateBehaviorSettings({ toolbarAlignment: value === "right" ? "right" : "left" }); }));
 				}
 			},
 			{
-				name: "Tool options",
-				desc: "Show contextual text buttons, or open options by clicking the active tool icon. Colour, width and presets stay in the toolbar.",
+				name: "工具选项",
+				desc: "用文字按钮显示当前选项，或点击当前工具图标打开菜单。颜色、粗细和预设仍留在工具栏。",
 				render: setting => {
-					setting.setName("Tool options").setDesc("Show contextual text buttons, or open options by clicking the active tool icon. Colour, width and presets stay in the toolbar.").addDropdown(dropdown => dropdown.addOptions({ buttons: "Text buttons", menus: "Menus" }).setValue(this.plugin.getToolOptionsPresentation()).onChange(value => { void this.plugin.updateBehaviorSettings({ toolOptionsPresentation: value === "menus" ? "menus" : "buttons" }); }));
+					setting.setName("工具选项").setDesc("用文字按钮显示当前选项，或点击当前工具图标打开菜单。颜色、粗细和预设仍留在工具栏。").addDropdown(dropdown => dropdown.addOptions({ buttons: "文字按钮", menus: "菜单" }).setValue(this.plugin.getToolOptionsPresentation()).onChange(value => { void this.plugin.updateBehaviorSettings({ toolOptionsPresentation: value === "menus" ? "menus" : "buttons" }); }));
 				}
 			},
 			{
-				name: "Drawing modifier",
-				desc: "Hold for a solid straight Pen/Highlighter line, or a circle, square, equilateral triangle or snapped line in Shapes.",
+				name: "绘图修饰键",
+				desc: "按住时，笔和荧光笔画实线直线；形状工具则约束为圆、正方形、等边三角形或吸附直线。",
 				render: setting => {
-					setting.setName("Drawing modifier").setDesc("Hold for a solid straight Pen/Highlighter line, or a circle, square, equilateral triangle or snapped line in Shapes.").addDropdown(dropdown => dropdown.addOptions({ shift: "Shift", alt: "Alt / Option", control: "Ctrl", meta: "Cmd / Windows", none: "Off" }).setValue(this.plugin.getDrawingModifier()).onChange(value => { void this.plugin.updateBehaviorSettings({ drawingModifier: value as PDFAnnotatorSettings["drawingModifier"] }); }));
+					setting.setName("绘图修饰键").setDesc("按住时，笔和荧光笔画实线直线；形状工具则约束为圆、正方形、等边三角形或吸附直线。").addDropdown(dropdown => dropdown.addOptions({ shift: "Shift", alt: "Alt / Option", control: "Ctrl", meta: "Cmd / Windows", none: "关闭" }).setValue(this.plugin.getDrawingModifier()).onChange(value => { void this.plugin.updateBehaviorSettings({ drawingModifier: value as PDFAnnotatorSettings["drawingModifier"] }); }));
 				}
 			},
 			{
-				name: "Right triangle modifier",
-				desc: "Hold during Shapes to fit a right triangle. Overrides the equilateral constraint; choose a different key from Drawing modifier.",
+				name: "直角三角形修饰键",
+				desc: "画形状时按住，拟合为直角三角形。会覆盖等边约束；请与绘图修饰键使用不同按键。",
 				render: setting => {
-					setting.setName("Right triangle modifier").setDesc("Hold during Shapes to fit a right triangle. Overrides the equilateral constraint; choose a different key from Drawing modifier.").addDropdown(dropdown => dropdown.addOptions({ alt: "Alt / Option", shift: "Shift", control: "Ctrl", meta: "Cmd / Windows", none: "Off" }).setValue(this.plugin.getRightTriangleModifier()).onChange(value => { void this.plugin.updateBehaviorSettings({ rightTriangleModifier: value as PDFAnnotatorSettings["rightTriangleModifier"] }); }));
+					setting.setName("直角三角形修饰键").setDesc("画形状时按住，拟合为直角三角形。会覆盖等边约束；请与绘图修饰键使用不同按键。").addDropdown(dropdown => dropdown.addOptions({ alt: "Alt / Option", shift: "Shift", control: "Ctrl", meta: "Cmd / Windows", none: "关闭" }).setValue(this.plugin.getRightTriangleModifier()).onChange(value => { void this.plugin.updateBehaviorSettings({ rightTriangleModifier: value as PDFAnnotatorSettings["rightTriangleModifier"] }); }));
 				}
 			},
 			{
-				name: "Copy embed button",
-				desc: "Show Copy embed after selecting a region. When hidden, the action remains in the Region menu.",
+				name: "复制嵌入按钮",
+				desc: "选中区域后显示「复制嵌入」。隐藏后该操作仍在区域菜单里。",
 				render: (setting) => {
 					setting
-						.setName("Copy embed button")
-						.setDesc("Show Copy embed after selecting a region. When hidden, the action remains in the Region menu.")
+						.setName("复制嵌入按钮")
+						.setDesc("选中区域后显示「复制嵌入」。隐藏后该操作仍在区域菜单里。")
 						.addToggle((toggle) => {
 							toggle
 								.setValue(this.plugin.shouldShowCopyEmbedToolbarButton())
@@ -121,12 +121,12 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 				}
 			},
 			{
-				name: "Automatic region embed copy",
-				desc: "Copy the annotated Markdown embed block as soon as a region is captured.",
+				name: "自动复制区域嵌入",
+				desc: "截取区域后立即复制带批注的 Markdown 嵌入块。",
 				render: (setting) => {
 					setting
-						.setName("Automatic region embed copy")
-						.setDesc("Copy the annotated Markdown embed block as soon as a region is captured.")
+						.setName("自动复制区域嵌入")
+						.setDesc("截取区域后立即复制带批注的 Markdown 嵌入块。")
 						.addToggle((toggle) => {
 							toggle
 								.setValue(this.plugin.shouldAutoCopyRegionEmbed())
@@ -137,12 +137,12 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 				}
 			},
 			{
-				name: "Embed controls",
-				desc: "Show the title and Open, Refresh, and Copy controls above annotated PDF embeds in notes.",
+				name: "嵌入控件",
+				desc: "在笔记里的批注 PDF 嵌入上方显示标题，以及打开、刷新、复制按钮。",
 				render: (setting) => {
 					setting
-						.setName("Embed controls")
-						.setDesc("Show the title and Open, Refresh, and Copy controls above annotated PDF embeds in notes.")
+						.setName("嵌入控件")
+						.setDesc("在笔记里的批注 PDF 嵌入上方显示标题，以及打开、刷新、复制按钮。")
 						.addToggle((toggle) => {
 							toggle
 								.setValue(this.plugin.shouldShowAnnotatedEmbedHeader())
@@ -153,12 +153,12 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 				}
 			},
 			{
-				name: "Action notices",
-				desc: "Show brief notices for drawing, saving, undo, and redo. Save failures are always shown.",
+				name: "操作提示",
+				desc: "绘制、保存、撤销和重做时显示简短提示。保存失败总会提示。",
 				render: (setting) => {
 					setting
-						.setName("Action notices")
-						.setDesc("Show brief notices for drawing, saving, undo, and redo. Save failures are always shown.")
+						.setName("操作提示")
+						.setDesc("绘制、保存、撤销和重做时显示简短提示。保存失败总会提示。")
 						.addToggle((toggle) => {
 							toggle
 								.setValue(this.plugin.shouldShowDrawingNotices())
@@ -169,12 +169,12 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 				}
 			},
 			{
-				name: "Rendering diagnostics",
-				desc: "Show live input and rendering timings. Enable only while investigating drawing problems.",
+				name: "渲染诊断",
+				desc: "显示实时输入和渲染耗时。只在排查绘制问题时打开。",
 				render: (setting) => {
 					setting
-						.setName("Rendering diagnostics")
-						.setDesc("Show live input and rendering timings. Enable only while investigating drawing problems.")
+						.setName("渲染诊断")
+						.setDesc("显示实时输入和渲染耗时。只在排查绘制问题时打开。")
 						.addToggle((toggle) => {
 							toggle
 								.setValue(this.plugin.shouldShowRenderTelemetry())
@@ -185,16 +185,16 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 				}
 			},
 			{
-				name: "Finger input",
-				desc: "Choose what one finger does on the page. Apple Pencil and mouse draw in both modes.",
+				name: "手指输入",
+				desc: "选择单指在页面上的作用。Apple Pencil 和鼠标在两种模式下都会绘制。",
 				render: (setting) => {
 					setting
-						.setName("Finger input")
-						.setDesc("Choose what one finger does on the page. Apple Pencil and mouse draw in both modes.")
+						.setName("手指输入")
+						.setDesc("选择单指在页面上的作用。Apple Pencil 和鼠标在两种模式下都会绘制。")
 						.addDropdown((dropdown) => {
 							dropdown
-								.addOption("allow-touch", "Draw with finger")
-								.addOption("pen-mouse-only", "Pan with finger")
+								.addOption("allow-touch", "手指绘制")
+								.addOption("pen-mouse-only", "手指平移")
 								.setValue(this.plugin.getInkInputPolicy())
 								.onChange(async (value) => {
 									await this.plugin.updateBehaviorSettings({ inkInputPolicy: value as InkInputPolicy });
@@ -203,17 +203,17 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 				}
 			},
 			{
-				name: "Stroke preview",
-				desc: "Choose a fast preview, an accurate preview, or automatic smoothing. Pencil pressure stays enabled in every mode.",
+				name: "笔迹预览",
+				desc: "选择快速预览、精确预览，或自动平滑。所有模式下 Pencil 压感都保持开启。",
 				render: (setting) => {
 					setting
-						.setName("Stroke preview")
-						.setDesc("Fast uses fewer curve subdivisions while writing. Accurate matches saved geometry. Smoothest uses the automatic smoothing mode. New ink follows measured Pencil contact with continuous curves; older ink retains adaptive tip prediction. Pencil pressure stays enabled.")
+						.setName("笔迹预览")
+						.setDesc("快速：书写时曲线细分更少。精确：与保存的几何一致。最顺滑：使用自动平滑。新笔迹按测到的 Pencil 接触画连续曲线；旧笔迹保留自适应笔尖预测。压感保持开启。")
 						.addDropdown((dropdown) => {
 							dropdown
-								.addOption("fast", "Fast")
-								.addOption("accurate", "Accurate")
-								.addOption("auto-smooth", "Smoothest")
+								.addOption("fast", "快速")
+								.addOption("accurate", "精确")
+								.addOption("auto-smooth", "最顺滑")
 								.setValue(this.plugin.getLivePreviewMode())
 								.onChange(async (value) => {
 									await this.plugin.updateBehaviorSettings({ livePreviewMode: value as LivePreviewMode });
@@ -238,17 +238,17 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 		};
 		return [
 			{
-				name: "Pressure input",
-				desc: "Pens always use reported pressure. Choose how mouse and finger pressure is handled for new strokes.",
+				name: "压感输入",
+				desc: "笔始终使用上报的压感。请选择新笔画如何处理鼠标和手指的压感。",
 				render: (setting) => {
 					setting
-						.setName("Pressure input")
-						.setDesc("Pens always use reported pressure, retaining the last pressure if unavailable. Drawing speed applies only to mouse and finger input. Applies to new strokes.")
+						.setName("压感输入")
+						.setDesc("笔始终使用上报的压感；没有压感时沿用上一次。绘制速度只作用于鼠标和手指。仅影响新笔迹。")
 						.addDropdown((dropdown) => {
 							dropdown
-								.addOption("auto", "Automatic")
-								.addOption("simulate", "Drawing speed (mouse / finger)")
-								.addOption("stylus", "Stylus pressure")
+								.addOption("auto", "自动")
+								.addOption("simulate", "绘制速度（鼠标/手指）")
+								.addOption("stylus", "触控笔压感")
 								.setValue(this.plugin.getInkRenderSettings().pressureMode)
 								.onChange(async (value) => {
 									await updateInkRenderSettings({ pressureMode: value as InkPressureMode });
@@ -257,12 +257,12 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 				}
 			},
 			{
-				name: "Stroke width response",
-				desc: "How strongly pressure changes line width. Higher values produce more variation.",
+				name: "笔画粗细响应",
+				desc: "压感对线宽的影响有多强。数值越高，粗细变化越明显。",
 				render: (setting) => {
 					setting
-						.setName("Pressure sensitivity")
-						.setDesc("0 keeps a constant width. Higher values make firmer Pencil pressure increase width more strongly. Applies to new strokes.")
+						.setName("压感灵敏度")
+						.setDesc("0 表示粗细不变。数值越高，Pencil 按得越重，线条越粗。仅影响新笔迹。")
 						.addSlider((slider) => {
 							slider
 								.setLimits(0, 1, 0.05)
@@ -275,12 +275,30 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 				}
 			},
 			{
-				name: "Stabilization",
-				desc: "0 disables path stabilization. Higher values smooth hand wobble more strongly and follow the pen less immediately. Changes apply only to new strokes.",
+				name: "鼠标/触控板平滑",
+				desc: "用于 Mac 触控板和鼠标：实时滤掉手抖和锯齿（One Euro 滤波），慢速更稳、快速依然跟手。0 关闭；越大越稳，但慢速书写时笔尖会稍滞后。仅影响新笔迹。",
 				render: (setting) => {
 					setting
-						.setName("Stabilization")
-						.setDesc("0 disables path stabilization. Higher values smooth hand wobble more strongly and follow the pen less immediately. Changes apply only to new strokes.")
+						.setName("鼠标/触控板平滑")
+						.setDesc("用于 Mac 触控板和鼠标：实时滤掉手抖和锯齿（One Euro 滤波），慢速更稳、快速依然跟手。0 关闭；越大越稳，但慢速书写时笔尖会稍滞后。仅影响新笔迹。")
+						.addSlider((slider) => {
+							slider
+								.setLimits(0, 1, 0.05)
+								.setValue(this.plugin.getInkRenderSettings().mouseSmoothing ?? 0.5)
+								.setDynamicTooltip()
+								.onChange(async (value) => {
+									await updateInkRenderSettings({ mouseSmoothing: value });
+								});
+						});
+				}
+			},
+			{
+				name: "稳定",
+				desc: "0 关闭路径稳定。数值越高，越能抹平手抖，但笔尖跟随会慢一些。仅影响新笔迹。",
+				render: (setting) => {
+					setting
+						.setName("稳定")
+						.setDesc("0 关闭路径稳定。数值越高，越能抹平手抖，但笔尖跟随会慢一些。仅影响新笔迹。")
 						.addSlider((slider) => {
 							slider
 								.setLimits(0, 1, 0.05)
@@ -293,14 +311,14 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 				}
 			},
 			{
-				name: "Width smoothing mode",
-				desc: "Extra smooth gently blends nearby pressure changes while following your Pencil pressure.",
+				name: "粗细平滑模式",
+				desc: "超平滑会在跟随 Pencil 压感的同时，轻轻混合相邻的压感变化。",
 				render: (setting) => {
-					setting.setName("Width smoothing mode")
-						.setDesc("Extra smooth follows Pencil pressure with a small local blend to soften sudden width changes. Applies to new strokes.")
+					setting.setName("粗细平滑模式")
+						.setDesc("超平滑会跟随 Pencil 压感，并用少量局部混合减弱突然的粗细变化。仅影响新笔迹。")
 						.addDropdown((dropdown) => {
-							dropdown.addOption("original", "Original")
-								.addOption("extra-smooth", "Extra smooth")
+							dropdown.addOption("original", "原始")
+								.addOption("extra-smooth", "超平滑")
 								.setValue(this.plugin.getInkRenderSettings().widthSmoothing ?? "extra-smooth")
 								.onChange(async (value) => {
 									await updateInkRenderSettings({ widthSmoothing: value === "original" ? "original" : "extra-smooth" });
@@ -309,12 +327,12 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 				}
 			},
 			{
-				name: "Stroke smoothing",
-				desc: "Round corners and soften neighbouring width transitions. Applies to new strokes.",
+				name: "笔迹平滑",
+				desc: "让转角更圆，并柔化相邻的粗细过渡。仅影响新笔迹。",
 				render: (setting) => {
 					setting
-						.setName("Stroke smoothing")
-						.setDesc("Higher values round corners more and soften width transitions. Extra smooth keeps pressure changes local; Original preserves peak widths. Applies to new strokes; stabilization controls hand wobble.")
+						.setName("笔迹平滑")
+						.setDesc("数值越高，转角越圆，粗细过渡越柔和。超平滑把压感变化限制在局部；原始模式保留峰值粗细。仅影响新笔迹；手抖由「稳定」控制。")
 						.addSlider((slider) => {
 							slider
 								.setLimits(0, 1, 0.05)
@@ -327,18 +345,18 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 				}
 			},
 			{
-				name: "Pressure curve",
-				desc: "Choose how gradually pressure changes are applied to line width.",
+				name: "压感曲线",
+				desc: "选择压感变化反映到线宽时有多平缓。",
 				render: (setting) => {
 					setting
-						.setName("Pressure curve")
-						.setDesc("Choose how gradually pressure changes are applied to line width.")
+						.setName("压感曲线")
+						.setDesc("选择压感变化反映到线宽时有多平缓。")
 						.addDropdown((dropdown) => {
 							dropdown
-								.addOption("linear", "Linear")
-								.addOption("ease-in", "Ease in")
-								.addOption("ease-out", "Ease out")
-								.addOption("ease-in-out", "Ease in-out")
+								.addOption("linear", "线性")
+								.addOption("ease-in", "缓入")
+								.addOption("ease-out", "缓出")
+								.addOption("ease-in-out", "缓入缓出")
 								.setValue(this.plugin.getInkRenderSettings().easing)
 								.onChange(async (value) => {
 									await updateInkRenderSettings({ easing: value as InkEasingMode });
@@ -347,22 +365,22 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 				}
 			},
 			{
-				name: "Taper start",
-				desc: "How far the beginning narrows. 0 keeps a flat start.",
-				render: (setting) => this.renderInkSlider(setting, "Taper start", "How far the beginning narrows. 0 keeps a flat start.", "taperStart", updateInkRenderSettings)
+				name: "起笔渐细",
+				desc: "起笔收窄的程度。0 表示起笔不变细。",
+				render: (setting) => this.renderInkSlider(setting, "起笔渐细", "起笔收窄的程度。0 表示起笔不变细。", "taperStart", updateInkRenderSettings)
 			},
 			{
-				name: "Taper end",
-				desc: "How far the ending narrows. 0 keeps a flat end.",
-				render: (setting) => this.renderInkSlider(setting, "Taper end", "How far the ending narrows. 0 keeps a flat end.", "taperEnd", updateInkRenderSettings)
+				name: "收笔渐细",
+				desc: "收笔收窄的程度。0 表示收笔不变细。",
+				render: (setting) => this.renderInkSlider(setting, "收笔渐细", "收笔收窄的程度。0 表示收笔不变细。", "taperEnd", updateInkRenderSettings)
 			},
 			{
-				name: "Save delay",
-				desc: "Wait after the last edit before saving annotation data. Lower values save sooner.",
+				name: "保存延迟",
+				desc: "最后一次编辑后等待多久再保存批注。数值越低，保存越快。",
 				render: (setting) => {
 					setting
-						.setName("Save delay")
-						.setDesc("Wait after the last edit before saving annotation data. Lower values save sooner.")
+						.setName("保存延迟")
+						.setDesc("最后一次编辑后等待多久再保存批注。数值越低，保存越快。")
 						.addSlider((slider) => {
 							slider
 								.setLimits(200, 2000, 100)
@@ -383,11 +401,11 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 		};
 		return [
 
-			{ name: "Quick-add template", render: setting => { setting.setName("Default template")
-				.setDesc("Template used for new annotatable PDFs and the first added page.")
-				.addDropdown(dropdown => dropdown.addOption("blank", "Blank").addOption("ruled", "Ruled").addOption("grid", "Grid").addOption("dot", "Dotted")
+			{ name: "快速添加模板", render: setting => { setting.setName("默认模板")
+				.setDesc("新建可批注 PDF 和第一张添加页使用的模板。")
+				.addDropdown(dropdown => dropdown.addOption("blank", "空白").addOption("ruled", "横线").addOption("grid", "网格").addOption("dot", "点线")
 					.setValue(this.plugin.getQuickAddPageSettings().template).onChange(value => update({ template: value as PDFAnnotatorSettings["quickAddPageSettings"]["template"] }))); } },
-			{ name: "Quick-add paper colour", render: setting => {
+			{ name: "快速添加的纸色", render: setting => {
 				let syncDropdown: ((color: string) => void) | undefined;
 				let syncPicker: ((color: string) => void) | undefined;
 				const selectColor = async (color: string): Promise<void> => {
@@ -395,8 +413,8 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 					syncPicker?.(color);
 					await update({ paperColor: color });
 				};
-				setting.setName("Default paper colour")
-					.setDesc("Paper colour used for new annotatable PDFs and the first added page.")
+				setting.setName("默认纸色")
+					.setDesc("新建可批注 PDF 和第一张添加页使用的纸色。")
 					.addDropdown(dropdown => {
 						PAPER_COLOR_PRESETS.forEach(preset => { dropdown.addOption(preset.color, preset.label); });
 						let customOption: HTMLOptionElement | null = null;
@@ -405,7 +423,7 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 							if (!preset) {
 								if (customOption) customOption.value = color;
 								else {
-									dropdown.addOption(color, "Custom colour");
+									dropdown.addOption(color, "自定义颜色");
 									customOption = Array.from(dropdown.selectEl.options).find(option => option.value === color) ?? null;
 								}
 							}
@@ -419,8 +437,8 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 						syncPicker = color => { picker.setValue(color); };
 					});
 			} },
-			{ name: "Automatic page style", render: setting => {
-				setting.setName("").setDesc("The first page uses these defaults. Later pages follow the latest template or colour change anywhere in this PDF.");
+			{ name: "自动页面样式", render: setting => {
+				setting.setName("").setDesc("第一页使用这些默认值。之后的页面跟随这份 PDF 里最近一次模板或颜色更改。");
 				setting.settingEl.addClass("freedraw-pdf-quick-add-note");
 			} }
 		];
@@ -450,19 +468,19 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 	private getDefaultToolSettingDefinitions(): SettingDefinitionCompat[] {
 		return [
 			{
-				name: "Pen width",
-				desc: "Starting width for new pen strokes.",
-				render: (setting) => this.renderDefaultWidthSetting(setting, "Pen width", "Starting width for new pen strokes.", "pen", TOOL_WIDTH_RANGES.pen.min, TOOL_WIDTH_RANGES.pen.max)
+				name: "笔的粗细",
+				desc: "新笔画的起始粗细。",
+				render: (setting) => this.renderDefaultWidthSetting(setting, "笔的粗细", "新笔画的起始粗细。", "pen", TOOL_WIDTH_RANGES.pen.min, TOOL_WIDTH_RANGES.pen.max)
 			},
 			{
-				name: "Highlighter width",
-				desc: "Starting width for new highlighter strokes.",
-				render: (setting) => this.renderDefaultWidthSetting(setting, "Highlighter width", "Starting width for new highlighter strokes.", "highlighter", TOOL_WIDTH_RANGES.highlighter.min, TOOL_WIDTH_RANGES.highlighter.max)
+				name: "荧光笔粗细",
+				desc: "新荧光笔笔画的起始粗细。",
+				render: (setting) => this.renderDefaultWidthSetting(setting, "荧光笔粗细", "新荧光笔笔画的起始粗细。", "highlighter", TOOL_WIDTH_RANGES.highlighter.min, TOOL_WIDTH_RANGES.highlighter.max)
 			},
 			{
-				name: "Eraser size",
-				desc: "Starting contact area for the eraser.",
-				render: (setting) => this.renderDefaultWidthSetting(setting, "Eraser size", "Starting contact area for the eraser.", "eraser", TOOL_WIDTH_RANGES.eraser.min, TOOL_WIDTH_RANGES.eraser.max)
+				name: "橡皮大小",
+				desc: "橡皮的起始接触范围。",
+				render: (setting) => this.renderDefaultWidthSetting(setting, "橡皮大小", "橡皮的起始接触范围。", "eraser", TOOL_WIDTH_RANGES.eraser.min, TOOL_WIDTH_RANGES.eraser.max)
 			}
 		];
 	}
@@ -514,18 +532,18 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 
 	private getFileManagementRows(): SettingDefinitionCompat[] {
 		return [
-			{ name: "Recover annotations from JSON", render: setting => { setting.setName("Recover annotations from JSON")
-			.setDesc("Replace the active PDF's annotation layer with an earlier copy from the same folder. Current data is backed up. Use Combine JSON to add missing strokes.")
-			.addButton(button => button.setButtonText("Choose recovery").onClick(() => this.plugin.restoreActiveAnnotationData())); } },
-			{ name: "Combine annotation JSON files", render: setting => { setting.setName("Combine annotation JSON files")
-			.setDesc("Choose one PDF, a folder, or the whole vault. Add missing strokes, keeping different versions as separate stacked strokes. Combined recovery copies move to trash after saving.")
-			.addButton(button => button.setButtonText("Combine JSON").onClick(async () => {
+			{ name: "从 JSON 恢复批注", render: setting => { setting.setName("从 JSON 恢复批注")
+			.setDesc("用同一文件夹里的较早副本替换当前 PDF 的批注层。当前数据会先备份。补回缺失笔迹请用「合并 JSON」。")
+			.addButton(button => button.setButtonText("选择恢复文件").onClick(() => this.plugin.restoreActiveAnnotationData())); } },
+			{ name: "合并批注 JSON", render: setting => { setting.setName("合并批注 JSON")
+			.setDesc("选择一个 PDF、一个文件夹或整个库。补上缺失笔迹，不同版本作为分开的叠层保留。合并用过的恢复副本在保存后移入回收站。")
+			.addButton(button => button.setButtonText("合并 JSON").onClick(async () => {
 				button.setDisabled(true);
 				try { await this.plugin.cleanAnnotationFiles(false); } finally { button.setDisabled(false); }
 			})); } },
-			{ name: "Remove data for deleted PDFs", render: setting => { setting.setName("Remove data for deleted PDFs")
-			.setDesc("Remove leftover annotation and recovery JSONs whose PDF is missing. Starts with the whole vault; you can limit it to a folder or PDF. You confirm before files move to trash.")
-			.addButton(button => button.setButtonText("Clean deleted PDFs").onClick(async () => {
+			{ name: "清理已删除 PDF 的数据", render: setting => { setting.setName("清理已删除 PDF 的数据")
+			.setDesc("删除 PDF 已不在时残留的批注和恢复 JSON。默认整个库，也可限定到文件夹或某个 PDF。移入回收站前会要求确认。")
+			.addButton(button => button.setButtonText("清理已删除的 PDF").onClick(async () => {
 				button.setDisabled(true);
 				try { await this.plugin.cleanAnnotationFiles(true); } finally { button.setDisabled(false); }
 			})); } }
@@ -535,27 +553,27 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 	// Structural compatibility keeps the minimum supported API at 1.12.
 	// Obsidian 1.13+ renders and indexes these native groups; older versions use display().
 	getSettingDefinitions(): { type: "group"; heading: string; cls: string; items: SettingDefinitionCompat[] }[] {
-		const shortcuts: SettingDefinitionCompat = { name: "Tool and preset shortcuts", desc: "Assign shortcuts in Settings → Hotkeys. Search Freedraw PDF for tools, drawing modes, preset slots and line styles.", render: setting => { setting.setName("Tool and preset shortcuts").setDesc("Assign shortcuts in Settings → Hotkeys. Search Freedraw PDF for Pen and Highlighter modes, preset slots, line styles, shape options and other tools. No shortcuts are assigned automatically."); } };
+		const shortcuts: SettingDefinitionCompat = { name: "工具与预设快捷键", desc: "在「设置 → 快捷键」中搜索「笔刷」「荧光笔」「橡皮」「文字」即可修改。预设槽位的颜色和粗细在工具栏里配置。", render: setting => { setting.setName("工具与预设快捷键").setDesc("默认快捷键（仅在打开 PDF 时生效，可在「设置 → 快捷键」搜索「笔刷」「荧光笔」「橡皮」「文字」修改）：笔刷预设 1/2/3 为 Ctrl+Shift+Q/W/E；荧光笔预设 1/2/3 为 Ctrl+Shift+A/S/D；橡皮预设 1/2/3 为 Ctrl+Shift+Z/X/C；文字为 Ctrl+Shift+T。颜色、粗细和透明度在 PDF 工具栏的对应槽位里改，快捷键始终切到那个槽位。"); } };
 		const rows = new Map([...this.buildSettingRows(), shortcuts, ...ocrSettingRows(this.plugin), ...this.getFileManagementRows()].map(row => [row.name, row]));
-		for (const name of ["Quick-add template", "Quick-add paper colour", "Automatic page style"]) {
+		for (const name of ["快速添加模板", "快速添加的纸色", "自动页面样式"]) {
 			const row = rows.get(name);
 			if (row) row.visible = () => true;
 		}
 		const groups: [string, string[]][] = [
-			["Drawing input", ["Finger input", "Stroke preview"]],
-			["Pen pressure", ["Pressure input", "Stroke width response", "Pressure curve"]],
-			["Stroke smoothing", ["Stabilization", "Width smoothing mode", "Stroke smoothing"]],
-			["Tool sizes", ["Pen width", "Highlighter width", "Eraser size"]],
-			["Shapes", ["Shape creation", "Drag shape", "Shape line style"]],
-			["Stroke ends", ["Taper start", "Taper end"]],
-			["Pages / Quick add", ["Quick-add template", "Quick-add paper colour", "Automatic page style"]],
-			["Toolbar", ["Toolbar placement", "Toolbar alignment", "Tool options", "Drawing modifier", "Right triangle modifier", "Region capture button", "Copy embed button"]],
-			["Keyboard shortcuts", ["Tool and preset shortcuts"]],
-			["Markdown embeds", ["Automatic region embed copy", "Embed controls"]],
-			["Saving", ["Save delay"]],
-			["Handwriting recognition", ocrSettingRows(this.plugin).map(row=>row.name)],
-			["File management", ["Recover annotations from JSON", "Combine annotation JSON files", "Remove data for deleted PDFs"]],
-			["Debug", ["Action notices", "Rendering diagnostics"]]
+			["绘图输入", ["手指输入", "笔迹预览"]],
+			["笔的压感", ["压感输入", "笔画粗细响应", "压感曲线"]],
+			["笔迹平滑", ["鼠标/触控板平滑", "稳定", "粗细平滑模式", "笔迹平滑"]],
+			["工具大小", ["笔的粗细", "荧光笔粗细", "橡皮大小"]],
+			["形状", ["形状创建方式", "拖拽形状", "形状线型"]],
+			["笔画两端", ["起笔渐细", "收笔渐细"]],
+			["页面 / 快速添加", ["快速添加模板", "快速添加的纸色", "自动页面样式"]],
+			["工具栏", ["工具栏位置", "工具栏对齐", "工具选项", "绘图修饰键", "直角三角形修饰键", "区域截取按钮", "复制嵌入按钮"]],
+			["快捷键", ["工具与预设快捷键"]],
+			["Markdown 嵌入", ["自动复制区域嵌入", "嵌入控件"]],
+			["保存", ["保存延迟"]],
+			["手写识别", ocrSettingRows(this.plugin).map(row=>row.name)],
+			["文件管理", ["从 JSON 恢复批注", "合并批注 JSON", "清理已删除 PDF 的数据"]],
+			["调试", ["操作提示", "渲染诊断"]]
 		];
 		return groups.map(([heading, names]) => ({
 			type: "group", heading, cls: "freedraw-pdf-settings-native-group",
@@ -573,26 +591,26 @@ export class PDFAnnotatorSettingTab extends PluginSettingTab {
 			this.renderSettingDefinitions(body, definitions, names);
 			return body;
 		};
-		renderSection("Drawing input", ["Finger input", "Stroke preview"]);
-		renderSection("Pen pressure", ["Pressure input", "Stroke width response", "Pressure curve"]);
-		renderSection("Stroke smoothing", ["Stabilization", "Width smoothing mode", "Stroke smoothing"]);
-		renderSection("Tool sizes", ["Pen width", "Highlighter width", "Eraser size"]);
-		renderSection("Shapes", ["Shape creation", "Drag shape", "Shape line style"]);
-		renderSection("Stroke ends", ["Taper start", "Taper end"]);
-		const pages = renderSection("Pages / Quick add", []);
+		renderSection("绘图输入", ["手指输入", "笔迹预览"]);
+		renderSection("笔的压感", ["压感输入", "笔画粗细响应", "压感曲线"]);
+		renderSection("笔迹平滑", ["鼠标/触控板平滑", "稳定", "粗细平滑模式", "笔迹平滑"]);
+		renderSection("工具大小", ["笔的粗细", "荧光笔粗细", "橡皮大小"]);
+		renderSection("形状", ["形状创建方式", "拖拽形状", "形状线型"]);
+		renderSection("笔画两端", ["起笔渐细", "收笔渐细"]);
+		const pages = renderSection("页面 / 快速添加", []);
 		this.quickAddDefaultsEl = pages.createDiv({ cls: "freedraw-pdf-quick-add-defaults" });
-		this.renderSettingDefinitions(this.quickAddDefaultsEl, definitions, ["Quick-add template", "Quick-add paper colour", "Automatic page style"]);
+		this.renderSettingDefinitions(this.quickAddDefaultsEl, definitions, ["快速添加模板", "快速添加的纸色", "自动页面样式"]);
 		this.syncQuickAddDefaultFields();
-		renderSection("Toolbar", ["Toolbar placement", "Toolbar alignment", "Tool options", "Drawing modifier", "Right triangle modifier", "Region capture button", "Copy embed button"]);
-		const hotkeys = this.renderSettingsSection(containerEl, "Keyboard shortcuts");
-		new Setting(hotkeys).setName("Tool and preset shortcuts").setDesc("Assign shortcuts in Settings → Hotkeys. Search Freedraw PDF for Pen and Highlighter modes, preset slots, line styles, shape options and other tools. No shortcuts are assigned automatically.");
-		renderSection("Markdown embeds", ["Automatic region embed copy", "Embed controls"]);
-		renderSection("Saving", ["Save delay"]);
-		const recognition = this.renderSettingsSection(containerEl, "Handwriting recognition");
+		renderSection("工具栏", ["工具栏位置", "工具栏对齐", "工具选项", "绘图修饰键", "直角三角形修饰键", "区域截取按钮", "复制嵌入按钮"]);
+		const hotkeys = this.renderSettingsSection(containerEl, "快捷键");
+		new Setting(hotkeys).setName("工具与预设快捷键").setDesc("默认快捷键（仅在打开 PDF 时生效，可在「设置 → 快捷键」搜索「笔刷」「荧光笔」「橡皮」「文字」修改）：笔刷预设 1/2/3 为 Ctrl+Shift+Q/W/E；荧光笔预设 1/2/3 为 Ctrl+Shift+A/S/D；橡皮预设 1/2/3 为 Ctrl+Shift+Z/X/C；文字为 Ctrl+Shift+T。颜色、粗细和透明度在 PDF 工具栏的对应槽位里改，快捷键始终切到那个槽位。");
+		renderSection("Markdown 嵌入", ["自动复制区域嵌入", "嵌入控件"]);
+		renderSection("保存", ["保存延迟"]);
+		const recognition = this.renderSettingsSection(containerEl, "手写识别");
 		for (const row of ocrSettingRows(this.plugin)) row.render(new Setting(recognition));
-		const files = this.renderSettingsSection(containerEl, "File management");
+		const files = this.renderSettingsSection(containerEl, "文件管理");
 		for (const row of this.getFileManagementRows()) row.render(new Setting(files));
-		renderSection("Debug", ["Action notices", "Rendering diagnostics"]);
+		renderSection("调试", ["操作提示", "渲染诊断"]);
 	}
 }
 

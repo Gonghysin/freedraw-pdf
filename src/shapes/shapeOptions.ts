@@ -11,7 +11,7 @@ export function normalizeShapeOptions(value?: Partial<ShapeOptions>): ShapeOptio
 		width: finite(input?.width, highlighter ? 12 : 3, highlighter ? 4 : 1, highlighter ? 64 : 48),
 		opacity: finite(input?.opacity, highlighter ? .24 : .96, .05, 1)
 	});
-	return { method, shape, appearance: value?.appearance === "highlighter" ? "highlighter" : "pen",
+	return { method, shape, appearance: value?.appearance === "highlighter" ? "highlighter" : "pen", ...(value?.filled === true ? { filled: true } : {}),
 		lineStyle: value?.lineStyle === "dashed" || value?.lineStyle === "dotted" || value?.lineStyle === "wavy" ? value.lineStyle : "solid",
 		waveSize: finite(value?.waveSize, 1.5, .25, 6), pen: style(value?.pen, false), highlighter: style(value?.highlighter, true) };
 }
@@ -31,6 +31,7 @@ export function drawAndHoldOptions(value?: Partial<ShapeOptions>): ShapeOptions 
 export function normalizeShapeFields<T extends ShapeAnnotation>(shape: T): T {
 	const next = { ...shape };
 	if (next.appearance !== "pen" && next.appearance !== "highlighter") delete next.appearance;
+	if (next.filled !== undefined && next.filled !== true) delete next.filled;
 	if (next.opacity !== undefined) next.opacity = finite(next.opacity, next.appearance === "highlighter" ? .24 : .96, .05, 1);
 	if (next.lineStyle !== undefined && !["solid", "dashed", "dotted", "wavy"].includes(next.lineStyle)) delete next.lineStyle;
 	if (next.waveSize !== undefined) next.waveSize = finite(next.waveSize, 1.5, .25, 6);

@@ -34,15 +34,15 @@ async function renderSyntheticPageToCanvas(annotationDocument: AnnotationDocumen
 	const syntheticIndex = pageNumber - realPdfPageCount - 1;
 	const syntheticPage = annotationDocument.appendedPages?.[syntheticIndex];
 	if (!syntheticPage) {
-		throw new Error(`Missing inserted notebook page ${pageNumber}.`);
+		throw new Error(`缺少已插入的笔记页 ${pageNumber}。`);
 	}
-	const dimensions = getNotebookPageRenderDimensions(syntheticPage.pageSize, EXPORT_PAGE_WIDTH_PX);
+	const dimensions = getNotebookPageRenderDimensions(syntheticPage.pageSize, EXPORT_PAGE_WIDTH_PX, syntheticPage.customSize);
 	const canvas = createEl("canvas");
 	canvas.width = dimensions.width;
 	canvas.height = dimensions.height;
 	const context = canvas.getContext("2d");
 	if (!context) {
-		throw new Error("Could not create export canvas.");
+		throw new Error("无法创建导出画布。");
 	}
 	drawTemplatePageBackground(context, canvas.width, canvas.height, syntheticPage);
 	if (includeAnnotations) {
@@ -61,7 +61,7 @@ async function renderPdfPageToCanvas(box: PdfDisplayBox, annotationDocument: Ann
 	canvas.height = Math.max(1, Math.round(EXPORT_PAGE_WIDTH_PX * height / width));
 	const context = canvas.getContext("2d");
 	if (!context) {
-		throw new Error("Could not create export canvas.");
+		throw new Error("无法创建导出画布。");
 	}
 	// Remain transparent: printed text and vector graphics stay in the source page.
 	const pageTemplate = hasEditableNativePageTemplates(annotationDocument, realPdfPageCount)
@@ -70,7 +70,7 @@ async function renderPdfPageToCanvas(box: PdfDisplayBox, annotationDocument: Ann
 	if (pageTemplate) {
 		drawTemplatePageBackground(context, canvas.width, canvas.height, {
 			id: `pdf-template-${pageNumber}`,
-			title: `Page ${pageNumber}`,
+			title: `第 ${pageNumber} 页`,
 			kind: "template",
 			template: pageTemplate.template,
 			paperColor: pageTemplate.paperColor,
@@ -97,10 +97,11 @@ async function renderMixedPagesToPdfBytes(
 ): Promise<{ pdfBytes: Uint8Array; pageMap: Map<number, number> }> {
 	const binary = await app.vault.adapter.readBinary(sourceFile.path);
 	return buildPdfWithOverlays(new Uint8Array(binary), mixedEntries.map(entry => entry.pageNumber), async (pageNumber, box) => {
-		if (Boolean(box) !== (pageNumber <= realPdfPageCount)) throw new Error("The source PDF changed. Reopen it before exporting.");
+		if (Boolean(box) !== (pageNumber <= realPdfPageCount)) throw new Error("源 PDF 已发生变化。导出前请重新打开它。");
 		const sideways = box?.rotation === 90 || box?.rotation === 270;
-		const pageSize = annotationDocument.appendedPages?.[pageNumber - realPdfPageCount - 1]?.pageSize ?? "a4";
-		const dimensions = getNotebookPageSizeDimensions(pageSize);
+		const addedPage = annotationDocument.appendedPages?.[pageNumber - realPdfPageCount - 1];
+		const pageSize = addedPage?.customSize ? "a4" : addedPage?.pageSize ?? "a4";
+		const dimensions = getNotebookPageSizeDimensions(pageSize, addedPage?.customSize);
 		const widthPt = box ? (sideways ? box.height : box.width) : pageSize === "letter" ? 612 : 595.276 * dimensions.width / 920;
 		const heightPt = box ? (sideways ? box.width : box.height) : pageSize === "letter" ? 792 : widthPt * dimensions.height / dimensions.width;
 		const hasAnnotations = includeAnnotations && [annotationDocument.strokes, annotationDocument.textItems, annotationDocument.shapes, annotationDocument.imageItems ?? []]
@@ -131,18 +132,18 @@ export async function exportAnnotatedMixedDocumentPdf(
 	realPdfPageCount: number
 ): Promise<TFile | null> {
 	if (mixedEntries.length === 0) {
-		new Notice("No pages available to export.");
+		new Notice("没有可导出的页面。");
 		return null;
 	}
 
 	try {
 		const { pdfBytes } = await renderMixedPagesToPdfBytes(app, sourceFile, annotationDocument, mixedEntries, realPdfPageCount, true);
 		const outputFile = await createUniquePdfFile(app, sourceFile, pdfBytes, "annotated mixed");
-		new Notice(`Exported ${outputFile.name}`);
+		new Notice(`已导出 ${outputFile.name}`);
 		return outputFile;
 	} catch (error) {
 		console.error("freedraw-pdf: failed to export mixed annotated PDF", error);
-		new Notice("Could not export annotated mixed PDF.");
+		new Notice("无法导出带批注的混合 PDF。");
 		return null;
 	}
 }
@@ -155,17 +156,17 @@ export async function createNativeMixedWorkingPdf(
 	realPdfPageCount: number
 ): Promise<NativeMixedWorkingPdfResult | null> {
 	if (mixedEntries.length === 0) {
-		new Notice("No pages available to materialize.");
+		new Notice("没有可生成的页面。");
 		return null;
 	}
 	try {
 		const { pdfBytes, pageMap } = await renderMixedPagesToPdfBytes(app, sourceFile, annotationDocument, mixedEntries, realPdfPageCount, false);
 		const file = await createUniquePdfFile(app, sourceFile, pdfBytes, "native mixed working");
-		new Notice(`Created ${file.name}`);
+		new Notice(`已创建 ${file.name}`);
 		return { file, pageMap };
 	} catch (error) {
 		console.error("freedraw-pdf: failed to create native mixed working PDF", error);
-		new Notice("Could not create native mixed working PDF.");
+		new Notice("无法创建原生混合工作 PDF。");
 		return null;
 	}
 }

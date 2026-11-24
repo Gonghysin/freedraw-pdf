@@ -5,7 +5,7 @@ import { OcrServiceError, recogniseInk, type OcrResult, type OcrTransport } from
 /** Bounded recovery for temporary service failures; never retry credentials/model errors. */
 export async function recogniseInkWithRetry(settings: OcrSettings, credential: string, image: string, box: NormalizedRect, transport: OcrTransport, clock: Pick<Window, "setTimeout">, isCurrent: () => boolean, onRetry: (attempt: number, delayMs: number, status: number) => void): Promise<OcrResult> {
 	for (let attempt = 0; ; attempt++) {
-		if (!isCurrent()) throw new Error("Recognition cancelled.");
+		if (!isCurrent()) throw new Error("已取消识别。");
 		try { return await recogniseInk(settings, credential, image, box, transport); }
 		catch (error) {
 			if (!(error instanceof OcrServiceError) || ![408, 500, 502, 503, 504].includes(error.status) || attempt >= 2 || !isCurrent()) throw error;
